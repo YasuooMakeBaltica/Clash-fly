@@ -90,3 +90,16 @@ def test_env_runs_a_match_with_the_coach():
         a, _ = env.teacher()
         f, r, done = env.step(a)
     assert set(env.results()) <= {-1, 0, 1}
+
+
+def test_duplicate_duel_cancels_luck():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from duel_coaches import coach_factory, duel
+
+    m, se, diff = duel(coach_factory(""), coach_factory(""), pairs=3, seed=1)
+    assert m == 0 and diff == 0                    # identical coaches: every pairing splits 1-1
+    make = coach_factory("hold_line=7, place:building_y=6")
+    c = make()
+    assert c.p["hold_line"] == 7.0 and c.placer is not None

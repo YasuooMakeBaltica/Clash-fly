@@ -75,6 +75,11 @@ def load_agent(brain_path: str, device: str = "cpu"):
     ckpt = torch.load(brain_path, weights_only=False)
     args = argparse.Namespace(**ckpt["args"])
     args.device = device
+    if "n_mbon" in ckpt["args"]:          # full card pool brain (train_royale.py)
+        from train_royale import make_agent as make_royale_agent
+        agent = make_royale_agent(args, probe=None)
+        agent.load_state_dict(ckpt["agent"])
+        return agent
     agent = make_agent(args, probe=None)
     agent.load_state_dict(ckpt["agent"])
     return agent

@@ -110,6 +110,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--out", default=str(ROOT / "models/fly_royale.pt"))
+    ap.add_argument("--dataset", help="save recorded decisions here (.npz), or reuse them if the file exists")
     args = ap.parse_args()
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -118,8 +119,15 @@ def main():
     print("fly deck:", fly_deck)
 
     t0 = time.time()
-    print("1. recording coach decisions")
-    X, M, A, ACT = record(args, fly_deck)
+    if args.dataset and Path(args.dataset).exists():
+        print(f"1. reusing recorded decisions from {args.dataset}")
+        d = np.load(args.dataset)
+        X, M, A, ACT = d["X"], d["M"], d["A"], d["ACT"]
+    else:
+        print("1. recording coach decisions")
+        X, M, A, ACT = record(args, fly_deck)
+        if args.dataset:
+            np.savez_compressed(args.dataset, X=X, M=M, A=A, ACT=ACT)
     rng = np.random.default_rng(args.seed)
     idx = rng.permutation(len(X))
     test, train = idx[:2000], idx[2000:]

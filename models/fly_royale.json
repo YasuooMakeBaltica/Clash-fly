@@ -1,0 +1,50 @@
+[
+ {
+  "stage": "start",
+  "agreement": {
+   "wait": 0.6518833535844472,
+   "role": 0.2598870056497175,
+   "lane": 0.5649717514124294
+  }
+ },
+ {
+  "stage": "epoch 1",
+  "agreement": {
+   "wait": 0.6287970838396112,
+   "role": 0.3983050847457627,
+   "lane": 0.8107344632768362
+  }
+ },
+ {
+  "stage": "eval",
+  "opponent": "random",
+  "decks": "random decks",
+  "win": 0.59375,
+  "draw": 0.0,
+  "loss": 0.40625
+ },
+ {
+  "stage": "eval",
+  "opponent": "random",
+  "decks": "fly deck",
+  "win": 0.40625,
+  "draw": 0.03125,
+  "loss": 0.5625
+ },
+ {
+  "stage": "eval",
+  "opponent": "basic",
+  "decks": "random decks",
+  "win": 0.21875,
+  "draw": 0.0,
+  "loss": 0.78125
+ },
+ {
+  "stage": "eval",
+  "opponent": "basic",
+  "decks": "fly deck",
+  "win": 0.03125,
+  "draw": 0.0,
+  "loss": 0.96875
+ }
+]

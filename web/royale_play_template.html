@@ -1,0 +1,437 @@
+<title>Beat the Fly: Full Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: deck builder first; then a phone-shaped arena with your hand, and the fly's readout beside it. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --fg: #17212b; --muted: #5a6774; --line: #d6dce2; --soft: #e7ebef;
+  --grass: #cfe3c4; --grass-2: #c4dbb8; --river: #8cc2e6; --bridge: #b89567;
+  --me: #2f5fd0; --foe: #c8443b; --elixir: #b03cc8; --gold: #d29a1c; --good: #2c8a4c; --bad: #b8403a;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10161c; --panel: #17202a; --fg: #e3e9ef; --muted: #93a0ad; --line: #2a3640; --soft: #212b35;
+    --grass: #2c3e2a; --grass-2: #283825; --river: #2f6a92; --bridge: #7c6142;
+    --me: #7d9df2; --foe: #ef7f76; --elixir: #d27be6; --gold: #ebb84a; --good: #5cc07f; --bad: #ef7f76; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10161c; --panel: #17202a; --fg: #e3e9ef; --muted: #93a0ad; --line: #2a3640; --soft: #212b35;
+  --grass: #2c3e2a; --grass-2: #283825; --river: #2f6a92; --bridge: #7c6142;
+  --me: #7d9df2; --foe: #ef7f76; --elixir: #d27be6; --gold: #ebb84a; --good: #5cc07f; --bad: #ef7f76; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 16px; }
+header h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(28px, 5vw, 40px); line-height: 1.1; margin: 0; letter-spacing: -0.01em; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 72ch; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.eyebrow { font: 500 11px var(--f-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+.btn { font: 600 15px var(--f-body); background: var(--me); color: #fff; border: 0; border-radius: 10px; padding: 10px 22px; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); font-size: 13px; padding: 6px 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:focus-visible, .card:focus-visible, .pick:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+select, input[type="search"] { font: 14px var(--f-body); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+/* deck builder */
+.mydeck { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 640px) { .mydeck { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.slot { border: 1px dashed var(--line); border-radius: 8px; min-height: 52px; padding: 4px; font-size: 12px; text-align: center; display: grid; align-content: center; cursor: pointer; }
+.slot b { font-weight: 600; overflow-wrap: break-word; }
+.slot span { font: 600 12px var(--f-mono); color: var(--elixir); }
+.slot.filled { border-style: solid; }
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
+.pick { font: inherit; text-align: left; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; cursor: pointer; display: grid; gap: 1px; }
+.pick b { font-size: 13px; font-weight: 600; }
+.pick small { font: 11px var(--f-mono); color: var(--muted); }
+.pick.in { border-color: var(--me); box-shadow: inset 0 0 0 1px var(--me); }
+.note { color: var(--muted); font-size: 13px; margin: 0; max-width: 76ch; }
+.warn { color: var(--bad); font-size: 13px; margin: 0; min-height: 1.4em; }
+/* game */
+.stage { display: grid; grid-template-columns: minmax(0, 410px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 840px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.crowns { font: 700 22px var(--f-display); font-variant-numeric: tabular-nums; }
+.crowns .me { color: var(--me); } .crowns .foe { color: var(--foe); }
+.clock { font: 600 18px var(--f-mono); font-variant-numeric: tabular-nums; }
+.clock.double { color: var(--elixir); }
+.arena-box { position: relative; }
+#arena { width: 100%; max-width: 100%; aspect-ratio: 18 / 32; display: block; border-radius: 8px; touch-action: manipulation; cursor: crosshair; }
+.overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; text-align: center; padding: 24px; background: color-mix(in srgb, var(--panel) 84%, transparent); border-radius: 8px; }
+.overlay h2 { font: 700 28px var(--f-display); margin: 0; }
+.overlay p { margin: 0; color: var(--muted); max-width: 34ch; }
+.elixir { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.ebar { height: 14px; border-radius: 4px; background: var(--soft); display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; overflow: hidden; }
+.ebar i { background: var(--soft); }
+.ebar i.on { background: var(--elixir); }
+.ebar i.part { background: linear-gradient(90deg, var(--elixir) var(--p), var(--soft) var(--p)); opacity: 0.6; }
+.enum { font: 700 18px var(--f-mono); color: var(--elixir); min-width: 2ch; text-align: right; }
+.hand { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 0.7fr); gap: 6px; }
+.card { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px; display: grid; gap: 2px; text-align: center; cursor: pointer; min-width: 0; }
+.card b { font-weight: 600; font-size: 12px; overflow-wrap: break-word; hyphens: auto; line-height: 1.2; }
+.card span { font: 600 13px var(--f-mono); color: var(--elixir); }
+.card small { font-size: 10px; color: var(--muted); }
+.card.sel { border-color: var(--me); box-shadow: inset 0 0 0 2px var(--me); }
+.card.poor { opacity: 0.45; }
+.card.next { cursor: default; border-style: dashed; color: var(--muted); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.5em; }
+.did { font: 600 16px var(--f-body); }
+.votes { display: grid; grid-template-columns: minmax(0, 118px) 1fr 40px; gap: 3px 8px; align-items: center; font: 12px var(--f-mono); }
+.votes .bar { height: 9px; border-radius: 3px; background: var(--soft); overflow: hidden; }
+.votes .bar i { display: block; height: 100%; background: var(--foe); opacity: 0.5; }
+.votes .win .bar i { opacity: 1; } .votes .win { font-weight: 600; } .votes .off { opacity: 0.32; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 560px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips span { font: 12px var(--f-mono); background: var(--soft); border-radius: 6px; padding: 2px 7px; }
+.chips span.hot { background: color-mix(in srgb, var(--me) 22%, var(--soft)); }
+.log { font: 12px var(--f-mono); display: grid; gap: 3px; max-height: 190px; overflow-y: auto; }
+.log div { display: grid; grid-template-columns: 4ch 1fr; gap: 8px; }
+.log .me { color: var(--me); } .log .foe { color: var(--foe); } .log .tw { color: var(--gold); font-weight: 600; }
+.record { font: 13px var(--f-mono); color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Beat the Fly: Full Deck</h1>
+    <p>Play Clash Royale against a simulated fruit-fly mushroom body that knows all 109 cards. It decides once per second which kind of card to play (win condition, tank killer, small spell…) and in which lane; a helper picks the card and the spot. You are blue.</p>
+  </header>
+
+  <section class="panel" id="builder" aria-label="Deck builder">
+    <div class="top"><p class="eyebrow">Your deck</p><span class="record" id="avg">avg elixir –</span></div>
+    <div class="mydeck" id="mydeck"></div>
+    <div class="row">
+      <button class="btn ghost" id="rand-mine">Random deck</button>
+      <button class="btn ghost" id="copy-fly">Same as the fly's deck</button>
+      <button class="btn ghost" id="clear">Clear</button>
+      <label class="record" for="fly-deck-mode">The fly plays</label>
+      <select id="fly-deck-mode"><option value="fly">its own deck</option><option value="random">a random deck</option><option value="mirror">your deck</option></select>
+    </div>
+    <p class="note" id="fly-deck-text"></p>
+    <div class="row"><input type="search" id="search" placeholder="Search cards or roles" aria-label="Search cards"><select id="role-filter" aria-label="Filter by role"><option value="">All roles</option></select></div>
+    <div class="picker" id="picker"></div>
+    <p class="warn" id="deck-warn"></p>
+    <div class="row"><button class="btn" id="go" disabled>Battle</button><span class="record" id="record"></span></div>
+  </section>
+
+  <div class="stage" id="game" hidden>
+    <section class="panel" aria-label="Arena">
+      <div class="top">
+        <span class="crowns"><span class="me" id="cr-me">0</span> – <span class="foe" id="cr-foe">0</span></span>
+        <span class="clock" id="clock">3:00</span>
+        <span class="row"><button class="btn ghost" id="ability" hidden>Ability</button><button class="btn ghost" id="pause">Pause</button></span>
+      </div>
+      <div class="arena-box">
+        <canvas id="arena" width="720" height="1280" aria-label="Arena. Select a card, then tap to deploy."></canvas>
+        <div class="overlay" id="overlay" hidden>
+          <h2 id="ov-title"></h2>
+          <p id="ov-text"></p>
+          <div class="row" style="justify-content:center"><button class="btn" id="again">Play again</button><button class="btn ghost" id="change">Change deck</button></div>
+        </div>
+      </div>
+      <div class="elixir"><div class="ebar" id="ebar"></div><span class="enum" id="enum">5</span></div>
+      <div class="hand" id="hand"></div>
+      <p class="hint" id="hint">Pick a card (or press 1–4).</p>
+    </section>
+    <div style="display:grid; gap:16px; min-width:0">
+      <section class="panel" aria-label="The fly's last decision">
+        <p class="eyebrow" id="dec-title">The fly decides once per second</p>
+        <span class="did" id="did">–</span>
+        <div class="cols">
+          <div style="display:grid; gap:8px; min-width:0"><p class="eyebrow">Role vote (output neuron spikes)</p><div class="votes" id="role-votes"></div></div>
+          <div style="display:grid; gap:8px; min-width:0">
+            <p class="eyebrow">Lane vote</p><div class="votes" id="lane-votes"></div>
+            <p class="eyebrow" style="margin-top:6px">Kenyon cells active</p><div class="record" id="kc">–</div>
+            <p class="eyebrow" style="margin-top:6px">Fly's elixir</p><div class="record" id="fly-elixir">–</div>
+            <p class="eyebrow" style="margin-top:6px">Fly's hand</p><div class="record" id="fly-hand">–</div>
+          </div>
+        </div>
+        <p class="eyebrow">What the fly sees</p>
+        <div class="chips" id="sees"></div>
+      </section>
+      <section class="panel" aria-label="Match log"><p class="eyebrow">Match log</p><div class="log" id="log"></div></section>
+    </div>
+  </div>
+  <p class="note">Simplified simulator built from RoyaleAPI's datamine of the game files, all cards at level 11. No evolutions or event cards. It does not learn during your match.</p>
+</div>
+
+<script>/*CLASH_CORE*/</script>
+<script>/*ROYALE_CORE*/</script>
+<script>
+const CARD_DATA = /*CARDS*/null;
+const BRAIN_DATA = /*BRAIN*/null;
+const FLY_DECK = /*FLY_DECK*/null;
+const R = RoyaleCore, DB = R.buildDB(CARD_DATA), POOL = DB.pool().sort();
+const $ = (id) => document.getElementById(id);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const brain = new ClashCore.Brain(BRAIN_DATA, (Date.now() & 0xffff) + 1);
+const rng = ClashCore.rng((Math.random() * 2 ** 31) | 0);
+const G = { deck: [], sim: null, running: false, paused: false, sel: null, acc: 0, last: 0, prev: new Map(), next: 1, flash: null, flyDeck: null, record: { w: 0, d: 0, l: 0 } };
+try { const s = JSON.parse(localStorage.getItem("beat-the-fly-full") || "null"); if (s) { G.deck = s.deck || []; G.record = s.record || G.record; } } catch (e) {}
+const save = () => { try { localStorage.setItem("beat-the-fly-full", JSON.stringify({ deck: G.deck, record: G.record })); } catch (e) {} };
+const ROLE_LABEL = { win_condition: "win condition", tank_killer: "tank killer", frontline: "frontline", splash_ground: "splash ground", splash_air: "splash air", ranged: "ranged", swarm: "swarm", air: "air", cycle: "cycle", building: "building", spawner: "spawner", small_spell: "small spell", big_spell: "big spell", utility: "utility", champion: "champion" };
+const short = (name) => { const w = name.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^A-Za-z ]/g, " ").split(/\s+/).filter(Boolean); return w.length > 1 ? (w[0][0] + w[1][0]).toUpperCase() : (w[0] || "?").slice(0, 2); };
+const fmt = (t) => { const s = Math.max(0, Math.ceil(t)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const showRecord = () => { $("record").textContent = `you ${G.record.w}W ${G.record.d}D ${G.record.l}L vs the fly`; };
+
+// ------------------------------------------------------------ deck builder
+for (const r of R.ROLES) { const o = document.createElement("option"); o.value = r; o.textContent = ROLE_LABEL[r]; $("role-filter").append(o); }
+function deckProblems(deck) {
+  if (deck.length !== 8) return `Pick ${8 - deck.length} more card${deck.length === 7 ? "" : "s"}.`;
+  if (deck.filter((n) => DB.cards[n].champion).length > 1) return "Only one champion per deck.";
+  return "";
+}
+function randomDeck() {
+  for (let tries = 0; tries < 500; tries++) {
+    const by = {}; for (const n of POOL) (by[DB.cards[n].role] ||= []).push(n);
+    const pickFrom = (a) => a[rng.int(a.length)];
+    const d = [pickFrom(by.win_condition), pickFrom(by.small_spell)];
+    const second = by.big_spell.filter((n) => !d.includes(n)); d.push(pickFrom(second));
+    while (d.length < 8) { const c = pickFrom(POOL); if (d.includes(c) || DB.cards[c].role === "win_condition") continue; if (DB.cards[c].champion && d.some((n) => DB.cards[n].champion)) continue; if (DB.cards[c].type === "spell" && d.filter((n) => DB.cards[n].type === "spell").length >= 3) continue; d.push(c); }
+    const cards = d.map((n) => DB.cards[n]);
+    const air = cards.filter((c) => R.hitsAir(c) && c.type !== "spell").length, avg = cards.reduce((s, c) => s + c.elixir, 0) / 8;
+    if (air >= 2 && avg >= 2.6 && avg <= 4.6) return d;
+  }
+  return FLY_DECK.slice();
+}
+function renderBuilder() {
+  const md = $("mydeck"); md.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const n = G.deck[i], el = document.createElement("div");
+    el.className = "slot" + (n ? " filled" : "");
+    el.innerHTML = n ? `<b></b><span>${DB.cards[n].elixir}</span>` : "<small>empty</small>";
+    if (n) { el.querySelector("b").textContent = n; el.title = "Remove"; el.onclick = () => { G.deck.splice(i, 1); renderBuilder(); }; }
+    md.append(el);
+  }
+  const avg = G.deck.length ? G.deck.reduce((s, n) => s + DB.cards[n].elixir, 0) / G.deck.length : 0;
+  $("avg").textContent = `avg elixir ${G.deck.length ? avg.toFixed(1) : "–"}`;
+  const q = $("search").value.trim().toLowerCase(), rf = $("role-filter").value;
+  const pk = $("picker"); pk.innerHTML = "";
+  for (const n of POOL) {
+    const c = DB.cards[n];
+    if (rf && c.role !== rf) continue;
+    if (q && !(n.toLowerCase().includes(q) || ROLE_LABEL[c.role].includes(q))) continue;
+    const b = document.createElement("button");
+    b.className = "pick" + (G.deck.includes(n) ? " in" : "");
+    b.innerHTML = `<b></b><small>${c.elixir} · ${ROLE_LABEL[c.role]}</small>`;
+    b.querySelector("b").textContent = n;
+    b.onclick = () => {
+      if (G.deck.includes(n)) G.deck = G.deck.filter((x) => x !== n);
+      else if (G.deck.length < 8) G.deck.push(n);
+      renderBuilder();
+    };
+    pk.append(b);
+  }
+  const prob = deckProblems(G.deck);
+  $("deck-warn").textContent = prob; $("go").disabled = !!prob;
+  const mode = $("fly-deck-mode").value;
+  $("fly-deck-text").textContent = mode === "fly" ? `The fly's deck: ${FLY_DECK.join(", ")}.` : mode === "random" ? "The fly gets a random sensible deck each match." : "The fly plays your deck.";
+  save(); showRecord();
+}
+$("search").oninput = renderBuilder; $("role-filter").onchange = renderBuilder; $("fly-deck-mode").onchange = renderBuilder;
+$("rand-mine").onclick = () => { G.deck = randomDeck(); renderBuilder(); };
+$("copy-fly").onclick = () => { G.deck = FLY_DECK.slice(); renderBuilder(); };
+$("clear").onclick = () => { G.deck = []; renderBuilder(); };
+if (deckProblems(G.deck)) G.deck = randomDeck();
+renderBuilder();
+for (let i = 0; i < 10; i++) $("ebar").append(document.createElement("i"));
+
+// --------------------------------------------------------------- match flow
+function start() {
+  const mode = $("fly-deck-mode").value;
+  G.flyDeck = mode === "fly" ? FLY_DECK.slice() : mode === "mirror" ? G.deck.slice() : randomDeck();
+  G.sim = new R.Sim(DB, [G.deck.slice(), G.flyDeck], (Math.random() * 2 ** 31) | 0);
+  G.running = true; G.paused = false; G.sel = null; G.acc = 0; G.next = 1; G.prev = new Map(); G.last = 0; G.handKey = "";
+  $("builder").hidden = true; $("game").hidden = false; $("overlay").hidden = true; $("pause").textContent = "Pause";
+  $("log").innerHTML = ""; renderHand(); decideFly();
+}
+function end() {
+  G.running = false;
+  const w = G.sim.winner;
+  if (w === 0) G.record.w++; else if (w === 1) G.record.l++; else G.record.d++;
+  save(); showRecord();
+  const [a, b] = G.sim.players.map((p) => p.crowns);
+  $("ov-title").textContent = w === 0 ? "You win" : w === 1 ? "The fly wins" : "Draw";
+  $("ov-text").textContent = `${a} – ${b} in crowns.` + (G.sim.overtime ? " (overtime)" : "");
+  $("overlay").hidden = false;
+}
+$("go").onclick = start; $("again").onclick = start;
+$("change").onclick = () => { G.running = false; $("game").hidden = true; $("builder").hidden = false; renderBuilder(); };
+$("pause").onclick = () => { G.paused = !G.paused; $("pause").textContent = G.paused ? "Resume" : "Pause"; };
+$("ability").onclick = () => { if (G.sim && G.sim.useAbility(0)) addLog(0, "ability"); };
+
+function decideFly() {
+  const sim = G.sim, v = new R.View(sim, 1);
+  const f = R.features(v), mask = R.roleMask(v);
+  const r = brain.decide(f, mask, 0);
+  let did = "Wait";
+  if (r.card > 0) {
+    const card = R.pickCard(v, R.ROLES[r.card - 1]);
+    if (card) {
+      const [x, y] = R.place(v, card, r.lane);
+      if (sim.play(1, card, x, y)) { did = `${card} (${ROLE_LABEL[R.ROLES[r.card - 1]]}), ${r.lane ? "right" : "left"} lane`; addLog(1, card, x); }
+    }
+  }
+  if (R.autoAbility(sim, 1)) addLog(1, "ability");
+  renderFly(r, f, mask, did);
+}
+
+// --------------------------------------------------------------------- input
+function selectCard(slot) {
+  if (!G.running) return;
+  const c = G.sim.players[0].hand[slot];
+  G.sel = G.sel === c ? null : c;
+  renderHand();
+}
+document.addEventListener("keydown", (e) => {
+  if (["1", "2", "3", "4"].includes(e.key)) selectCard(+e.key - 1);
+  if (e.key === "Escape") { G.sel = null; renderHand(); }
+  if (e.key === "a" || e.key === "A") $("ability").click();
+});
+$("arena").addEventListener("pointerdown", (e) => {
+  if (!G.running || G.paused || G.sel === null) return;
+  const rect = e.target.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * 18, y = 32 - (e.clientY - rect.top) / rect.height * 32;
+  const sim = G.sim, c = G.sel;
+  if (!sim.canPlay(0, c)) { $("hint").textContent = DB.cards[c].champion && sim.championAlive(0) ? "Your champion is already on the field." : `Not enough elixir for ${c}.`; return; }
+  if (!sim.validPosition(0, c, x, y)) { $("hint").textContent = "You can't drop that there."; return; }
+  sim.play(0, c, x, y); addLog(0, c, x);
+  G.flash = { x, y, t: 0.4 }; G.sel = null; renderHand();
+});
+
+// -------------------------------------------------------------------- render
+function renderHand() {
+  const hand = $("hand"); hand.innerHTML = "";
+  if (!G.sim) return;
+  const p = G.sim.players[0];
+  p.hand.forEach((n, i) => {
+    const cost = G.sim.cardCost(0, n), b = document.createElement("button");
+    b.className = "card" + (G.sel === n ? " sel" : "") + (cost > p.elixir ? " poor" : "");
+    b.innerHTML = `<b></b><span>${cost > 20 ? "–" : cost}</span><small>${i + 1}</small>`;
+    b.querySelector("b").textContent = n; b.onclick = () => selectCard(i);
+    hand.append(b);
+  });
+  const nx = document.createElement("div"); nx.className = "card next";
+  nx.innerHTML = `<small>next</small><b></b><span>${DB.cards[p.queue[0]].elixir}</span>`; nx.querySelector("b").textContent = p.queue[0];
+  hand.append(nx);
+  const c = G.sel && DB.cards[G.sel];
+  $("hint").textContent = !c ? "Pick a card (or press 1–4)." : c.type === "spell" && !c.summons.length ? `Tap anywhere to cast ${G.sel}.` : c.deploy_anywhere ? `Tap anywhere (not the river) to send ${G.sel}.` : `Tap your half of the arena to drop ${G.sel}.`;
+}
+function renderElixir() {
+  const p = G.sim.players[0], e = p.elixir;
+  [...$("ebar").children].forEach((el, i) => { el.className = i < Math.floor(e) ? "on" : i === Math.floor(e) ? "part" : ""; el.style.setProperty("--p", `${(e - Math.floor(e)) * 100}%`); });
+  $("enum").textContent = Math.floor(e);
+  [...$("hand").children].slice(0, 4).forEach((b, i) => b.classList.toggle("poor", G.sim.cardCost(0, p.hand[i]) > e));
+  const champ = G.sim.units.find((u) => u.alive && u.owner === 0 && u.spec && u.spec.ability);
+  $("ability").hidden = !champ;
+  if (champ) { const ab = champ.spec.ability; $("ability").textContent = champ.ability_cd > 0 ? `Ability ${Math.ceil(champ.ability_cd)}s` : `Ability (${ab.cost})`; $("ability").disabled = champ.ability_cd > 0 || e < ab.cost || champ.deploy_left > 0; }
+}
+function renderFly(r, f, mask, did) {
+  $("dec-title").textContent = `The fly's decision at ${fmt(R.REGULATION - G.sim.time)} left`;
+  $("did").textContent = did;
+  const names = ["wait"].concat(R.ROLES.map((x) => ROLE_LABEL[x]));
+  const rv = $("role-votes"); rv.innerHTML = "";
+  const mx = Math.max(0.05, ...r.cardVotes);
+  r.cardVotes.forEach((v, i) => {
+    const cls = (mask[i] ? "" : "off ") + (i === r.card ? "win" : "");
+    rv.insertAdjacentHTML("beforeend", `<span class="${cls}"></span><div class="bar ${cls}"><i style="width:${v / mx * 100}%"></i></div><span class="${cls}">${v.toFixed(2)}</span>`);
+    rv.children[rv.children.length - 3].textContent = names[i];
+  });
+  const lv = $("lane-votes"); lv.innerHTML = "";
+  const lm = Math.max(0.05, ...r.laneVotes);
+  r.laneVotes.forEach((v, i) => { const cls = r.card !== 0 && i === r.lane ? "win" : ""; lv.insertAdjacentHTML("beforeend", `<span class="${cls}">${i ? "Right" : "Left"}</span><div class="bar ${cls}"><i style="width:${v / lm * 100}%"></i></div><span class="${cls}">${v.toFixed(2)}</span>`); });
+  $("kc").textContent = `${(r.kcActive * 100).toFixed(1)}% of ${BRAIN_DATA.n_kc}`;
+  $("fly-elixir").textContent = G.sim.players[1].elixir.toFixed(1);
+  $("fly-hand").textContent = G.sim.players[1].hand.join(", ");
+  const sees = $("sees"); sees.innerHTML = "";
+  f.forEach((on, i) => { if (!on) return; const s = R.CHANNELS[i], sp = document.createElement("span"); sp.textContent = s; if (/threat|enemy (building-targeter|air|swarm|splash|ranged|tank killer|building)/.test(s) && !/no threat/.test(s)) sp.className = "hot"; sees.append(sp); });
+}
+function addLog(player, card, x) {
+  const d = document.createElement("div"); d.className = player === 0 ? "me" : "foe";
+  d.innerHTML = `<span>${fmt(R.REGULATION - G.sim.time)}</span><span></span>`;
+  d.lastChild.textContent = card === "ability" ? `${player === 0 ? "You" : "Fly"}: champion ability` : `${player === 0 ? "You" : "Fly"}: ${card} (${x < 9 ? "left" : "right"})`;
+  $("log").prepend(d);
+}
+function logTowers(before) {
+  for (const e of G.sim.events.slice(before)) if (e.kind === "tower") {
+    const d = document.createElement("div"); d.className = "tw";
+    d.innerHTML = `<span>${fmt(R.REGULATION - e.t)}</span><span></span>`;
+    d.lastChild.textContent = `${e.player === 0 ? "You destroy" : "The fly destroys"} a ${e.tower} tower`;
+    $("log").prepend(d);
+  }
+}
+function drawArena(w) {
+  const c = $("arena"), g = c.getContext("2d"), S = c.width / 18, X = (x) => x * S, Y = (y) => (32 - y) * S;
+  g.clearRect(0, 0, c.width, c.height);
+  for (let r = 0; r < 32; r++) { g.fillStyle = r % 2 ? css("--grass") : css("--grass-2"); g.fillRect(0, r * S, c.width, S); }
+  g.fillStyle = css("--river"); g.fillRect(0, Y(17), c.width, 2 * S);
+  g.fillStyle = css("--bridge"); for (const lx of R.LANE_X) g.fillRect(X(lx - 1), Y(17.3), 2 * S, 2.6 * S);
+  const sim = G.sim; if (!sim) return;
+  if (G.sel !== null) {
+    const card = DB.cards[G.sel];
+    if (!(card.type === "spell")) {
+      g.fillStyle = css("--foe"); g.globalAlpha = 0.14;
+      if (card.deploy_anywhere) g.fillRect(0, Y(17), c.width, 2 * S);
+      else for (let lane = 0; lane < 2; lane++) { const pocket = !sim.tower(1, "princess", lane).alive && card.type !== "building"; g.fillRect(X(lane * 9), 0, 9 * S, Y(pocket ? 20 : 14.5)); }
+      g.globalAlpha = 1;
+    }
+  }
+  for (const t of sim.towers()) {
+    const half = t.tower === "king" ? 2 : 1.5, col = t.owner === 0 ? css("--me") : css("--foe");
+    if (!t.alive) { g.fillStyle = css("--soft"); g.globalAlpha = 0.7; g.fillRect(X(t.x - half), Y(t.y + half), 2 * half * S, 2 * half * S); g.globalAlpha = 1; continue; }
+    g.fillStyle = col; g.globalAlpha = t.tower === "king" && !t.active ? 0.55 : 0.92;
+    g.beginPath(); g.roundRect(X(t.x - half), Y(t.y + half), 2 * half * S, 2 * half * S, 8); g.fill(); g.globalAlpha = 1;
+    g.fillStyle = "#fff"; g.font = `600 ${S * 0.55}px ${css("--f-mono")}`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(Math.ceil(t.hp), X(t.x), Y(t.y));
+    bar(g, X(t.x - half), Y(t.y + half) - S * 0.45, 2 * half * S, t.hp / t.max_hp, col, S);
+  }
+  for (const e of sim.effects) { if (e.delay > 0 || !e.spec.radius) continue; g.strokeStyle = e.owner === 0 ? css("--me") : css("--foe"); g.lineWidth = 3; g.setLineDash([8, 7]); g.beginPath(); g.arc(X(e.x), Y(e.y), e.spec.radius * S, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+  for (const p of sim.projectiles) { if (p.travelled < 0) continue; g.fillStyle = p.owner === 0 ? css("--me") : css("--foe"); g.beginPath(); g.arc(X(p.x), Y(p.y), Math.max(4, (p.spec.radius || 0.2) * S * 0.35), 0, Math.PI * 2); g.fill(); }
+  for (const u of sim.units) {
+    if (u.tower || u.timed) continue;
+    const pv = G.prev.get(u.uid);
+    const x = pv ? pv[0] + (u.x - pv[0]) * w : u.x, y = pv ? pv[1] + (u.y - pv[1]) * w : u.y;
+    const r = Math.max(0.35, u.radius) * S, col = u.owner === 0 ? css("--me") : css("--foe");
+    g.globalAlpha = u.deploy_left > 0 ? 0.4 : u.invisible ? 0.3 : 1;
+    if (u.flying) { g.fillStyle = "rgba(0,0,0,0.18)"; g.beginPath(); g.ellipse(X(x), Y(y) + r * 0.9, r * 0.8, r * 0.3, 0, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = col;
+    if (u.building) { g.beginPath(); g.roundRect(X(x) - r, Y(y) - r, 2 * r, 2 * r, 5); g.fill(); }
+    else { g.beginPath(); g.arc(X(x), Y(y) - (u.flying ? r * 0.5 : 0), r, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = "#fff"; g.font = `600 ${Math.max(13, r * 0.85)}px ${css("--f-mono")}`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(short(u.spec.name), X(x), Y(y) - (u.flying ? r * 0.5 : 0) + 1);
+    g.globalAlpha = 1;
+    if (u.hp < u.max_hp || u.shield > 0) bar(g, X(x) - r, Y(y) - r - S * 0.35 - (u.flying ? r * 0.5 : 0), 2 * r, u.hp / u.max_hp, col, S * 0.7);
+  }
+  if (G.flash) { g.strokeStyle = css("--me"); g.lineWidth = 3; g.globalAlpha = Math.max(0, G.flash.t / 0.4); g.beginPath(); g.arc(X(G.flash.x), Y(G.flash.y), S * (1.6 - G.flash.t * 2), 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1; }
+}
+function bar(g, x, y, w, frac, col, S) { g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(x, y, w, S * 0.22); g.fillStyle = col; g.fillRect(x, y, w * Math.max(0, Math.min(1, frac)), S * 0.22); }
+
+function frame(now) {
+  const dt = G.last ? Math.min(0.25, (now - G.last) / 1000) : 0; G.last = now;
+  if (G.running && !G.paused) {
+    G.acc += dt;
+    while (G.acc >= R.DT && G.running) {
+      G.acc -= R.DT;
+      G.prev = new Map(G.sim.units.map((u) => [u.uid, [u.x, u.y]]));
+      const before = G.sim.events.length;
+      G.sim.step(); logTowers(before);
+      if (G.sim.time >= G.next - 1e-9 && !G.sim.done) { G.next += 1; decideFly(); }
+      if (G.sim.done) end();
+    }
+    if (G.flash) { G.flash.t -= dt; if (G.flash.t <= 0) G.flash = null; }
+    $("cr-me").textContent = G.sim.players[0].crowns; $("cr-foe").textContent = G.sim.players[1].crowns;
+    const left = (G.sim.overtime ? R.OVERTIME_END : R.REGULATION) - G.sim.time;
+    $("clock").textContent = (G.sim.overtime ? "OT " : "") + fmt(left); $("clock").classList.toggle("double", G.sim.elixirMultiplier > 1);
+    renderElixir();
+    const key = G.sim.players[0].hand.join(",") + "|" + G.sel + "|" + G.sim.players[0].last_card;
+    if (key !== G.handKey) { G.handKey = key; renderHand(); }
+  }
+  if (!$("game").hidden) drawArena(G.running ? Math.min(1, G.acc / R.DT) : 1);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>

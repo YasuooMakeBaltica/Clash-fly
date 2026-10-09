@@ -168,8 +168,19 @@ def spell_spot(view: View, name: str, lane: int | None = None) -> tuple[float, f
 
 
 # --------------------------------------------------------------- placement
-def place(view: View, name: str, lane: int) -> tuple[float, float]:
-    """Where to drop card ``name`` in ``lane``; absolute (x, y)."""
+PLACE_DEFAULTS = dict(
+    building_y=9.0,        # defensive buildings: centre, this far up our side
+    melee_ahead=2.5,       # melee defenders: this many tiles in front of the leading attacker
+    ranged_y=4.5,          # ranged defenders: beside the princess tower, this far up
+    ranged_dx=1.5,         # ... and this far towards the middle
+    bridge_y=14.0,         # attacking troops: at the bridge
+    support_behind=2.0,    # supporting a push: this far behind its front troop
+)
+
+
+def place(view: View, name: str, lane: int, **params) -> tuple[float, float]:
+    """Where to drop card ``name`` in ``lane``; absolute (x, y). ``params`` override PLACE_DEFAULTS."""
+    P = {**PLACE_DEFAULTS, **params} if params else PLACE_DEFAULTS
     db, me = view.db, view.me
     c = db.cards[name]
     if c.special == "mirror" and view.p.last_card:
@@ -216,28 +227,28 @@ def place(view: View, name: str, lane: int) -> tuple[float, float]:
         # Centre, about 6 tiles from the river: close enough to the bridge that building-targeting troops
         # (Hog Rider, Giant ...) turn to it, and both princess towers reach troops attacking it.
         # (Head-to-head, 400 games: 51% wins / 43% losses vs the old spot 6 tiles from the edge.)
-        return WIDTH / 2 - tc * 1.5, abs_y(me, 9.0)
+        return WIDTH / 2 - tc * 1.5, abs_y(me, P["building_y"])
     if threats:
         lead = min(threats, key=lambda u: view.fy(u.y))
         lead_fy = view.fy(lead.y)
         if c.role in ("ranged", "splash_air", "champion") and not c.name in ("Golden Knight", "Mighty Miner", "Monk"):
-            return lx + 1.5 * tc, abs_y(me, 4.5)
+            return lx + P["ranged_dx"] * tc, abs_y(me, P["ranged_y"])
         if lead_fy > RIVER_LO:
             return lx + tc, abs_y(me, 11.0)
         if c.role in ("swarm", "cycle", "air"):
             return lead.x, abs_y(me, max(0.5, lead_fy - 1.0))
-        return float(np.clip(lead.x + tc, 0.5, WIDTH - 0.5)), abs_y(me, max(0.5, lead_fy - 2.5))
+        return float(np.clip(lead.x + tc, 0.5, WIDTH - 0.5)), abs_y(me, max(0.5, lead_fy - P["melee_ahead"]))
     if c.role == "win_condition":
         if name in HEAVY and view.elixir < 9 and view.sim.elixir_multiplier == 1:
             return WIDTH / 2 - tc * 1.5, abs_y(me, 1.0)
-        return lx, abs_y(me, 14.0)
+        return lx, abs_y(me, P["bridge_y"])
     pushers = view.pushers(lane)
     if pushers:
         lead = max(pushers, key=lambda u: view.fy(u.y))
-        return float(np.clip(lead.x, 0.5, WIDTH - 0.5)), abs_y(me, min(14.0, view.fy(lead.y) - 2.0))
+        return float(np.clip(lead.x, 0.5, WIDTH - 0.5)), abs_y(me, min(14.0, view.fy(lead.y) - P["support_behind"]))
     if c.role in ("ranged", "splash_air"):
         return lx, abs_y(me, 10.0)
-    return lx, abs_y(me, 14.0)
+    return lx, abs_y(me, P["bridge_y"])
 
 
 # ------------------------------------------------------------------- coach

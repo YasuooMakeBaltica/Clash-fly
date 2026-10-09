@@ -30,7 +30,7 @@ import torch  # noqa: E402
 from flybrain.agent import AgentConfig, FlyAgent  # noqa: E402
 from flybrain.connectome import load  # noqa: E402
 from flybrain.envs.royale.decks import load_deck  # noqa: E402
-from flybrain.envs.royale.env import HEADS, N_CHANNELS, SPLIT_HEADS, RoyaleEnv, decode, encode  # noqa: E402
+from flybrain.envs.royale.env import HEADS, N_CHANNELS, SPLIT_HEADS, RoyaleEnv, decode, encode, role_mask  # noqa: E402
 from flybrain.envs.royale.strategy import BasicBot, Coach, RandomBot  # noqa: E402
 from flybrain.plasticity import PlasticityConfig  # noqa: E402
 
@@ -67,6 +67,39 @@ def record(args, fly_deck):
             f, _, done = env.step(a)
         print(f"  recorded round {r + 1}/{rounds} vs {opp}: {sum(len(x) for x in X)} decisions", flush=True)
     return np.concatenate(X), np.concatenate(M), np.concatenate(A), np.concatenate(ACT)
+
+
+def record_on_policy(agent, args, fly_deck, matches, seed, follow_coach=0.0):
+    """DAgger: the brain plays (taking the coach's move with probability ``follow_coach``) and every
+    situation it ends up in is labelled with what the coach would do there."""
+    X, M, A, ACT = [], [], [], []
+    rng = np.random.default_rng(seed)
+    for r in range(max(1, matches // args.batch)):
+        opp = ("basic", "random", "coach")[r % 3]
+        env = RoyaleEnv(args.batch, OPPONENTS[opp], fly_deck=fly_deck, fly_deck_share=args.fly_deck_share,
+                        seed=seed * 1000 + r, heads=agent.heads)
+        f, done = env.reset(), False
+        while not done:
+            m = env.masks()
+            raw, active = env.teacher_raw()
+            live = ~env.done
+            role_masks = np.stack([role_mask(v) for v in env.views()])
+            X.append(f[live]); M.append(role_masks[live]); A.append(raw[live]); ACT.append(active[live])
+            a = agent.act(f, m, learn=False)
+            follow = rng.random(args.batch) < follow_coach
+            if follow.any():
+                a[follow] = env.teacher()[0][follow]
+            f, _, done = env.step(a)
+        print(f"  on-policy round {r + 1}: {sum(len(x) for x in X)} decisions vs {opp}", flush=True)
+    return np.concatenate(X), np.concatenate(M), np.concatenate(A), np.concatenate(ACT)
+
+
+def teach_epoch(agent, X, M, A, ACT, idx, B, rng):
+    perm = rng.permutation(idx)
+    for s in range(0, len(perm) - B + 1, B):
+        b = perm[s:s + B]
+        agent.act(X[b], brain_masks_batch(agent, M[b]), learn=False)
+        agent.teach(*encode(A[b], ACT[b], agent.heads))
 
 
 def brain_masks_batch(agent, M):
@@ -123,6 +156,9 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--out", default=str(ROOT / "models/fly_royale.pt"))
+    ap.add_argument("--init", help="start from this trained brain instead of a fresh one")
+    ap.add_argument("--dagger-rounds", type=int, default=0, help="rounds of learning from the brain's own games")
+    ap.add_argument("--dagger-matches", type=int, default=64, help="matches recorded per DAgger round")
     ap.add_argument("--split", action="store_true", help="separate play?/role/lane heads (see env.SPLIT_HEADS)")
     ap.add_argument("--wait-keep", type=float, default=1.0, help="share of coach 'wait' decisions taught (balances plays)")
     ap.add_argument("--n-kc", type=int, default=2500)
@@ -149,7 +185,18 @@ def main():
     test, train = idx[:2000], idx[2000:]
     print(f"   {len(X)} decisions ({(A[:, 0] > 0).mean():.0%} plays) in {time.time() - t0:.0f}s")
 
-    agent = make_agent(args, probe=X[train[:64]])
+    if args.init:
+        ckpt = torch.load(args.init, weights_only=False, map_location=args.device)
+        for k in ("split", "n_mbon", "n_kc", "decision_ms", "mbon_rate", "data", "scaling", "seed"):
+            if k in ckpt["args"]:
+                setattr(args, k, ckpt["args"][k])
+        agent = make_agent(args)
+        agent.load_state_dict(ckpt["agent"])
+        agent.cfg.epsilon = 0.0
+        agent.rule.cfg.lr = args.lr
+        print(f"   starting from {args.init}")
+    else:
+        agent = make_agent(args, probe=X[train[:64]])
     print("   calibration:", agent.calibration)
     log = [dict(stage="start", agreement=agreement(agent, X[test], M[test], A[test]))]
     print("   agreement before teaching:", log[-1]["agreement"])
@@ -159,12 +206,28 @@ def main():
     for ep in range(args.epochs):
         keep = (A[train, 0] > 0) | (rng.random(len(train)) < args.wait_keep)
         perm = rng.permutation(train[keep])
-        for s in range(0, len(perm) - B + 1, B):
-            b = perm[s:s + B]
-            agent.act(X[b], brain_masks_batch(agent, M[b]), learn=False)
-            agent.teach(*encode(A[b], ACT[b], agent.heads))
+        teach_epoch(agent, X, M, A, ACT, train[keep], B, rng)
         log.append(dict(stage=f"epoch {ep + 1}", agreement=agreement(agent, X[test], M[test], A[test])))
         print(f"   epoch {ep + 1}: agreement {log[-1]['agreement']}  ({time.time() - t0:.0f}s)", flush=True)
+
+    for k in range(args.dagger_rounds):
+        # The brain's own games reach situations the coach's games never show; label them with the coach.
+        follow = max(0.0, 0.5 - 0.2 * k)
+        print(f"   DAgger round {k + 1}/{args.dagger_rounds} (coach moves taken {follow:.0%} of the time)")
+        Xn, Mn, An, ACTn = record_on_policy(agent, args, fly_deck, args.dagger_matches, args.seed + 100 + k, follow)
+        start = len(X)
+        X, M, A, ACT = (np.concatenate([X, Xn]), np.concatenate([M, Mn]), np.concatenate([A, An]),
+                        np.concatenate([ACT, ACTn]))
+        new = np.arange(start, len(X))
+        old = rng.choice(train, size=min(len(train), len(new)), replace=False)
+        train = np.concatenate([train, new])
+        idx = np.concatenate([new, old])
+        keep = (A[idx, 0] > 0) | (rng.random(len(idx)) < args.wait_keep)
+        teach_epoch(agent, X, M, A, ACT, idx[keep], B, rng)
+        log.append(dict(stage=f"dagger {k + 1}", agreement=agreement(agent, X[test], M[test], A[test]),
+                        on_policy=agreement(agent, Xn, Mn, An)))
+        print(f"   after round {k + 1}: coach-data agreement {log[-1]['agreement']}, "
+              f"on its own games {log[-1]['on_policy']}  ({time.time() - t0:.0f}s)", flush=True)
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     saved_args = {k: v for k, v in vars(args).items() if k != "device"}

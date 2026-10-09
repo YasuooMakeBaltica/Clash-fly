@@ -193,13 +193,18 @@ class RoyaleEnv:
         return [np.stack([p[h] for p in per]) for h in range(len(self.heads))]
 
     def teacher(self) -> tuple[np.ndarray, np.ndarray]:
+        """The coach's choice for every match, in this env's head layout."""
+        return encode(*self.teacher_raw(), self.heads)
+
+    def teacher_raw(self) -> tuple[np.ndarray, np.ndarray]:
+        """The coach's choice as (role with 0 = wait, lane) and which of those are meaningful."""
         acts = np.zeros((self.batch, 2), dtype=np.int64)
         active = np.ones((self.batch, 2), dtype=bool)
         for i, v in enumerate(self.views()):
             card, lane = self.coach.suggest(v)
             acts[i] = (0 if card is None else 1 + ROLES.index(self.db.cards[card].role), lane)
             active[i, 1] = card is not None
-        return encode(acts, active, self.heads)
+        return acts, active
 
     @staticmethod
     def _score(sim: Sim):

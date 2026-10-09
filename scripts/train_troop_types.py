@@ -211,9 +211,7 @@ def main():
         torch.save(ckpt, str(args.out).replace(".pt", "_last.pt"))
         if acc > best:
             best = acc
-            torch.save(ckpt, args.out).parent.mkdir(parents=True, exist_ok=True)
-            torch.save(dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
-                            classes=CLASSES, crop=TypeNet.CROP, val_acc=float(acc), val_props=float(prop)), args.out)
+            torch.save(ckpt, args.out)
 
 
 if __name__ == "__main__":

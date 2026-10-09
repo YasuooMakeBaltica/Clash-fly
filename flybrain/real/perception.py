@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -246,6 +247,55 @@ class BadgeDetector:
             else:
                 groups.append([p])
         return [(float(np.mean([q[0] for q in g])), float(np.mean([q[1] for q in g])), len(g)) for g in groups]
+
+
+class TroopTracker:
+    """Smooths troop detections over frames.
+
+    A detector misses some troops in any single frame, so a troop is kept for
+    ``keep`` frames after it was last seen. A troop that shows up only once,
+    with a low score, is held back until it is seen again (phantoms rarely
+    repeat). Each troop's type is the most frequent type it was given so far.
+    """
+
+    def __init__(self, keep: int = 1, confirm_score: float = 0.5, radius: float = 2.0):
+        self.keep, self.confirm_score, self.radius = keep, confirm_score, radius
+        self.tracks: list[dict] = []
+
+    def reset(self) -> None:
+        self.tracks = []
+
+    def update(self, units: list[SeenUnit]) -> list[SeenUnit]:
+        from collections import Counter
+
+        free = list(range(len(self.tracks)))
+        for u in sorted(units, key=lambda u: -u.score):
+            best, bd = None, self.radius
+            for i in free:
+                t = self.tracks[i]
+                d = math.hypot(t["x"] - u.x, t["y"] - u.y)
+                if t["owner"] == u.owner and d <= bd:
+                    best, bd = i, d
+            if best is None:
+                self.tracks.append(dict(owner=u.owner, x=u.x, y=u.y, size=u.size, chars=Counter([u.char]),
+                                        score=u.score, hits=1, missed=0, fresh=True))
+                continue
+            free.remove(best)
+            t = self.tracks[best]
+            t.update(x=u.x, y=u.y, size=u.size, score=max(t["score"], u.score), hits=t["hits"] + 1, missed=0,
+                     fresh=True)
+            t["chars"][u.char] += 1
+        for i in free:
+            self.tracks[i]["missed"] += 1
+            self.tracks[i]["fresh"] = False
+        self.tracks = [t for t in self.tracks if t["missed"] <= self.keep]
+        out = []
+        for t in self.tracks:
+            if t["hits"] >= 2 or t["score"] >= self.confirm_score:
+                char = t["chars"].most_common(1)[0][0]
+                out.append(SeenUnit(owner=t["owner"], x=t["x"], y=t["y"], size=t["size"], char=char,
+                                    score=t["score"]))
+        return out
 
 
 # ------------------------------------------------------------------- frame

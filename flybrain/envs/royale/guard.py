@@ -9,6 +9,10 @@ card. Then the guard looks at what the coach would do and why:
   a counter-push, punishing an enemy who just spent elixir, or elixir about
   to be wasted): the coach's move is played.
 * the brain casts a spell with nothing worth hitting: it waits instead.
+* nothing is attacking you: a defensive building is not wasted on an empty
+  arena, and if your win condition is in hand the brain's cheap card makes way
+  for it (played when affordable, otherwise the elixir is saved for it).
+  Cycle decks otherwise spend everything on cheap cards and never attack.
 * the brain plays a card while the coach also wants to play: the brain's card
   goes to the coach's lane (the coach knows which lane needs it).
 
@@ -38,6 +42,14 @@ def guard(view: View, card: str | None, lane: int, coach: Coach | None = None) -
     c = view.db.cards[card]
     if c.type == "spell" and not c.summons and card != c_card and spell_spot(view, card)[0] < c.elixir:
         return None, lane, "veto"
+    if not any(view.threats(ln) for ln in (0, 1)):
+        if c.role == "building":
+            return None, lane, "veto"
+        win = next((n for n in view.p.hand if view.db.cards[n].role == "win_condition"), None)
+        if win is not None and card != win and c.role != "win_condition":
+            if view.elixir >= view.db.cards[win].elixir:
+                return win, (c_lane if c_card is not None else view.weak_lane()), "coach:win_condition"
+            return None, lane, "save"
     if c_card is not None:
         lane = c_lane
     return card, lane, "fly"

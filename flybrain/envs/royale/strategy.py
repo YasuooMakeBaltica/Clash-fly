@@ -263,13 +263,15 @@ COUNTER_ROLES = {
 }
 
 
+# trade_margin 1.5 and leak_single 9.8 (were 1.0 and 9.0): +5.6 ± 2.1 points per game against the old
+# values in duplicate-format head-to-heads (600 deck pairings on fresh seeds, scripts/duel_coaches.py).
 COACH_DEFAULTS = dict(
     enough_defense=0.8,    # skip defending a lane when our defenders have this share of the attackers' hit points
     hold_line=10.0,        # attackers closer than this (own-frame y) with no fitting card: save elixir instead
-    trade_margin=1.0,      # cast a spell when it hits this much more elixir than it costs
+    trade_margin=1.5,      # cast a spell when it hits this much more elixir than it costs
     push_hp=800.0,         # support a counter-push of at least this many hit points
     punish_below=2.5,      # opponent elixir at or below this: attack with the win condition
-    leak_single=9.0,       # play something at this elixir (single elixir) ...
+    leak_single=9.8,       # play something at this elixir (single elixir) ...
     leak_double=6.5,       # ... and at this elixir in double elixir
 )
 

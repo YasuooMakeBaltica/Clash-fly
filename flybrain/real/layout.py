@@ -1,15 +1,17 @@
 """Where things are on the Clash Royale screen.
 
 All boxes are fractions of the game screen (0..1 in x and y), so a layout
-works at any resolution with the same aspect ratio. The defaults are
-ESTIMATES for portrait 9:16 (LDPlayer at 540x960) and must be checked with
-``python -m flybrain.real.calibrate check`` on a real screenshot, then fixed
-with ``python -m flybrain.real.calibrate pick``.
+works at any resolution with the same aspect ratio. The defaults were
+measured on a real battle screenshot (LDPlayer, portrait 540x960). Check
+yours with ``python -m flybrain.real.calibrate check`` and fix boxes with
+``python -m flybrain.real.calibrate pick`` if they are off. The king tower
+HP bars were not on that screenshot (they only show once the king is hit),
+so those two boxes are still estimates.
 
 Arena mapping: the simulator's 18x32 tile grid is mapped linearly onto the
 ``arena`` box, with tile y = 0 at the bottom (your side) and 32 at the top.
-The game camera is tilted, so tiles are shorter than they are wide on
-screen; a linear map is a first approximation.
+On screen a tile is about 25 px wide and 21 px tall at 540x960 (the grass
+checkerboard is one tile per square).
 """
 
 from __future__ import annotations
@@ -40,27 +42,33 @@ class Box:
         return (self.x0 + self.x1) / 2, (self.y0 + self.y1) / 2
 
 
+def _px(x0, y0, x1, y1, w=540, h=960) -> Box:
+    return Box(x0 / w, y0 / h, x1 / w, y1 / h)
+
+
 def _slots() -> list[Box]:
-    w, gap, x = 0.165, 0.012, 0.29
-    return [Box(x + i * (w + gap), 0.835, x + i * (w + gap) + w, 0.945) for i in range(4)]
+    return [_px(x, 797, x + 94, 912) for x in (122, 223, 325, 426)]
 
 
 @dataclass
 class Layout:
-    arena: Box = field(default_factory=lambda: Box(0.0, 0.045, 1.0, 0.805))
-    elixir_bar: Box = field(default_factory=lambda: Box(0.28, 0.955, 0.98, 0.985))
+    arena: Box = field(default_factory=lambda: _px(41, 79, 499, 741))
+    elixir_bar: Box = field(default_factory=lambda: _px(150, 926, 519, 947))
     hand_slots: list[Box] = field(default_factory=_slots)
-    next_slot: Box = field(default_factory=lambda: Box(0.04, 0.885, 0.17, 0.965))
+    next_slot: Box = field(default_factory=lambda: _px(30, 895, 71, 947))
     ability_button: Box = field(default_factory=lambda: Box(0.80, 0.745, 0.96, 0.81))  # champion ability (estimate)
-    # Tower HP bars, as boxes in tile coordinates (x0, y_top, x1, y_bottom).
-    # Princess bars sit just above each tower; the king's above the king.
-    princess_bar_tiles: tuple[float, float, float, float] = (-1.7, 2.4, 1.7, 1.8)
-    king_bar_tiles: tuple[float, float, float, float] = (-2.2, 2.9, 2.2, 2.3)
+    # Tower HP bars, as boxes in tile coordinates relative to the tower
+    # (x0, y_top, x1, y_bottom). Enemy bars sit above their towers, yours
+    # below; the crown/level icon left of each bar is not included.
+    princess_bar_tiles: tuple[float, float, float, float] = (-0.87, 3.75, 1.42, 3.12)
+    own_princess_bar_tiles: tuple[float, float, float, float] = (-0.87, 0.56, 1.42, -0.02)
+    king_bar_tiles: tuple[float, float, float, float] = (-0.47, 5.56, 2.67, 4.88)        # estimate
+    own_king_bar_tiles: tuple[float, float, float, float] = (-0.47, -2.08, 2.67, -2.76)  # estimate
     # HSV colour ranges (OpenCV: H 0-180, S and V 0-255)
     elixir_hsv: tuple = ((135, 90, 110), (170, 255, 255))
     blue_hsv: tuple = ((95, 110, 110), (120, 255, 255))
     red_hsv: tuple = ((0, 120, 110), (8, 255, 255))
-    red2_hsv: tuple = ((172, 120, 110), (180, 255, 255))
+    red2_hsv: tuple = ((165, 110, 110), (180, 255, 255))
 
     # ------------------------------------------------------------ mapping
     def tile_to_frac(self, tx: float, ty: float) -> tuple[float, float]:
@@ -86,10 +94,10 @@ class Layout:
         for owner in (0, 1):
             for lane, lx in enumerate(LANE_X):
                 ty = 6.5 if owner == 0 else HEIGHT - 6.5
-                dx0, dt, dx1, db = self.princess_bar_tiles
+                dx0, dt, dx1, db = self.own_princess_bar_tiles if owner == 0 else self.princess_bar_tiles
                 out[(owner, "princess", lane)] = self.tile_box(lx + dx0, ty + dt, lx + dx1, ty + db)
             ty = 3.0 if owner == 0 else HEIGHT - 3.0
-            dx0, dt, dx1, db = self.king_bar_tiles
+            dx0, dt, dx1, db = self.own_king_bar_tiles if owner == 0 else self.king_bar_tiles
             out[(owner, "king", None)] = self.tile_box(WIDTH / 2 + dx0, ty + dt, WIDTH / 2 + dx1, ty + db)
         return out
 

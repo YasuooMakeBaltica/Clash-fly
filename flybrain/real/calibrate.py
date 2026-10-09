@@ -97,6 +97,11 @@ def cmd_pick(a):
         tx0, ty0 = lay.frac_to_tile(b.x0, b.y0)
         tx1, ty1 = lay.frac_to_tile(b.x1, b.y1)
         lay.princess_bar_tiles = (tx0 - LANE_X[0], ty0 - (32 - 6.5), tx1 - LANE_X[0], ty1 - (32 - 6.5))
+    b = _roi(img, "YOUR LEFT princess tower HP bar")
+    if b:
+        tx0, ty0 = lay.frac_to_tile(b.x0, b.y0)
+        tx1, ty1 = lay.frac_to_tile(b.x1, b.y1)
+        lay.own_princess_bar_tiles = (tx0 - LANE_X[0], ty0 - 6.5, tx1 - LANE_X[0], ty1 - 6.5)
     b = _roi(img, "the ENEMY KING tower HP bar (skip with c if not shown)")
     if b:
         tx0, ty0 = lay.frac_to_tile(b.x0, b.y0)

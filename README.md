@@ -192,7 +192,8 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    (In the old Command Prompt, `cmd`, use `set ADB=C:\LDPlayer\LDPlayer9\adb.exe`
    and `%ADB%` instead of `$ADB`.)
 
-   Open `shot_check.png`. If the boxes don't sit on the arena, elixir bar,
+   The screen positions were measured on a real LDPlayer 540×960 battle, so
+   they should already fit. Open `shot_check.png`. If the boxes don't sit on the arena, elixir bar,
    cards and tower HP bars, run `python -m flybrain.real.calibrate pick
    --image shot.png` and drag them. The card names in the hand boxes should
    be right; only if one shows `?`, save its picture from your screen

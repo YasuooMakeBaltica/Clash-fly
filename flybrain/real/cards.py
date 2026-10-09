@@ -31,6 +31,15 @@ ROOT = Path(__file__).resolve().parents[2]
 OFFICIAL_DIR = ROOT / "templates/official"
 SIZE = (30, 36)                       # (w, h) of the compared patch
 INNER = (0.14, 0.10, 0.86, 0.70)       # x0, y0, x1, y1 of the card art used for matching
+# The part of an official card image that a hand slot shows: the game zooms
+# the art in and drops the frame (fitted on a real 540x960 battle screenshot).
+CARD_ART = (0.075, 0.06, 0.925, 0.95)
+
+
+def slot_view(img: np.ndarray, art=CARD_ART) -> np.ndarray:
+    """What a hand slot shows of a full card image."""
+    h, w = img.shape[:2]
+    return img[int(art[1] * h):int(art[3] * h), int(art[0] * w):int(art[2] * w)]
 
 
 def download_official(dest: str | Path = OFFICIAL_DIR, workers: int = 8) -> list[str]:
@@ -98,7 +107,7 @@ class OfficialMatcher:
     def __init__(self, images: dict[str, np.ndarray], threshold: float = 0.55, margin: float = 0.03):
         self.names = sorted(images)
         self.threshold, self.margin = threshold, margin
-        inner = [_inner(_flatten(images[n])) for n in self.names]
+        inner = [_inner(slot_view(_flatten(images[n]))) for n in self.names]
         self.bank = np.stack([_vec(p) for p in inner]) if self.names else None
         self.grey_bank = np.stack([_vec(p, grey=True) for p in inner]) if self.names else None
 

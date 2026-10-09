@@ -13,7 +13,7 @@ from flybrain.envs.royale.strategy import BasicBot
 from flybrain.real.cards import DeckTracker, OfficialMatcher, fill_deck
 from flybrain.real.layout import Layout
 from flybrain.real.perception import Perception
-from flybrain.real.synthetic import card_picture, render, write_templates
+from flybrain.real.synthetic import render, slot_picture, write_templates
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL = load().pool()
@@ -22,12 +22,12 @@ POOL = load().pool()
 @pytest.fixture(scope="module")
 def official(tmp_path_factory):
     d = tmp_path_factory.mktemp("official")
-    write_templates(d, POOL)
+    write_templates(d, POOL, full=True)
     return d
 
 
 def slot_crop(name, rng, size=(89, 106), grey=False):
-    img = cv2.resize(card_picture(name), size, interpolation=cv2.INTER_AREA)
+    img = cv2.resize(slot_picture(name), size, interpolation=cv2.INTER_AREA)
     if grey:                                        # cards you can't afford are shown in grey
         img = (cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR) * 0.6).astype(np.uint8)
     img = np.clip(img * rng.uniform(0.85, 1.15) + rng.uniform(-15, 15), 0, 255).astype(np.uint8)

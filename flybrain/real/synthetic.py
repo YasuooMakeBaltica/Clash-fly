@@ -38,11 +38,19 @@ def card_picture(name: str, size=(90, 110)) -> np.ndarray:
     return img
 
 
-def write_templates(directory: str | Path, cards) -> None:
+def slot_picture(name: str) -> np.ndarray:
+    """A fake card as a hand slot shows it (zoomed in like the real game, see cards.CARD_ART)."""
+    from .cards import slot_view
+
+    return slot_view(card_picture(name))
+
+
+def write_templates(directory: str | Path, cards, full: bool = False) -> None:
+    """Card pictures as saved from the screen (or the full card images, like the official art, if ``full``)."""
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
     for name in cards:
-        cv2.imwrite(str(d / f"{name}.png"), card_picture(name))
+        cv2.imwrite(str(d / f"{name}.png"), card_picture(name) if full else slot_picture(name))
 
 
 def render(sim: Sim, lay: Layout, size=(540, 960)) -> np.ndarray:
@@ -74,9 +82,9 @@ def render(sim: Sim, lay: Layout, size=(540, 960)) -> np.ndarray:
     p = sim.players[0]
     for slot, name in zip(lay.hand_slots, p.hand):
         X0, Y0, X1, Y1 = slot.px(w, h)
-        img[Y0:Y1, X0:X1] = cv2.resize(card_picture(name), (X1 - X0, Y1 - Y0))
+        img[Y0:Y1, X0:X1] = cv2.resize(slot_picture(name), (X1 - X0, Y1 - Y0))
     X0, Y0, X1, Y1 = lay.next_slot.px(w, h)
-    img[Y0:Y1, X0:X1] = cv2.resize(card_picture(p.queue[0]), (X1 - X0, Y1 - Y0))
+    img[Y0:Y1, X0:X1] = cv2.resize(slot_picture(p.queue[0]), (X1 - X0, Y1 - Y0))
     X0, Y0, X1, Y1 = lay.elixir_bar.px(w, h)
     cv2.rectangle(img, (X0, Y0), (X1, Y1), DARK_BGR, -1)
     fill = X0 + int(round((X1 - X0) * p.elixir / 10))

@@ -22,6 +22,7 @@ import cv2
 import numpy as np
 
 from ..envs.royale.db import load
+from ..envs.royale.sim import HEIGHT, LANE_X, WIDTH
 from .layout import Box, Layout
 
 
@@ -178,6 +179,17 @@ class BadgeDetector:
     def __init__(self, min_area_frac: float = 2e-5, max_area_frac: float = 6e-4, merge_tiles: float = 1.2):
         self.min_area_frac, self.max_area_frac, self.merge_tiles = min_area_frac, max_area_frac, merge_tiles
 
+    @staticmethod
+    def tower_boxes(lay: Layout) -> list[Box]:
+        """Screen boxes covering each tower's picture (it is drawn taller than its 3x3 / 4x4 tiles)."""
+        out = []
+        for ty, top in ((6.5, 3.4), (HEIGHT - 6.5, 3.4)):
+            for lx in LANE_X:
+                out.append(lay.tile_box(lx - 1.9, ty + top, lx + 1.9, ty - 1.9))
+        for ty in (3.0, HEIGHT - 3.0):
+            out.append(lay.tile_box(WIDTH / 2 - 2.4, ty + 4.2, WIDTH / 2 + 2.4, ty - 2.4))
+        return out
+
     def detect(self, img: np.ndarray, lay: Layout) -> list[SeenUnit]:
         h, w = img.shape[:2]
         x0, y0, x1, y1 = lay.arena.px(w, h)
@@ -186,7 +198,15 @@ class BadgeDetector:
         ignore = np.zeros(hsv.shape[:2], np.uint8)
         for box in lay.tower_bars().values():
             bx0, by0, bx1, by1 = box.px(w, h)
-            ignore[max(0, by0 - y0 - 2):max(0, by1 - y0 + 2), max(0, bx0 - x0 - 2):max(0, bx1 - x0 + 2)] = 1
+            ignore[max(0, by0 - y0 - 2):max(0, by1 - y0 + 2), max(0, bx0 - x0 - 6):max(0, bx1 - x0 + 2)] = 1
+        # ... and the towers themselves (red/blue roofs, flags and the archers on them)
+        # ... the river away from the bridges (its water is blue) ...
+        for tx0, tx1 in ((-1.0, LANE_X[0] - 0.8), (LANE_X[0] + 0.8, LANE_X[1] - 0.8), (LANE_X[1] + 0.8, WIDTH + 1.0)):
+            bx0, by0, bx1, by1 = lay.tile_box(tx0, 17.2, tx1, 14.8).px(w, h)
+            ignore[max(0, by0 - y0):max(0, by1 - y0), max(0, bx0 - x0):max(0, bx1 - x0)] = 1
+        for box in self.tower_boxes(lay):
+            bx0, by0, bx1, by1 = box.px(w, h)
+            ignore[max(0, by0 - y0):max(0, by1 - y0), max(0, bx0 - x0):max(0, bx1 - x0)] = 1
         units: list[SeenUnit] = []
         for owner, m in ((0, blue_mask(hsv, lay)), (1, red_mask(hsv, lay))):
             m = m * (1 - ignore)

@@ -85,13 +85,43 @@ class Adb:
         base = [self.adb_path] + (["-s", self.serial] if self.serial else [])
         return base + list(args)
 
-    def run(self, *args: str) -> bytes:
+    def _adb(self, *args: str, timeout: float | None = None) -> str:
+        try:
+            r = subprocess.run([self.adb_path, *args], capture_output=True, text=True, timeout=timeout or self.timeout)
+            return (r.stdout + r.stderr).strip()
+        except subprocess.TimeoutExpired:
+            return "timeout"
+
+    def revive(self) -> None:
+        """Fix 'device offline' / 'no devices': reconnect, restart the adb server, connect to LDPlayer's port."""
+        self._adb("reconnect", "offline")
+        time.sleep(1.0)
+        if self.devices():
+            return
+        self._adb("kill-server")
+        self._adb("start-server", timeout=30)
+        for port in (5555, 5557, 5559):
+            self._adb("connect", f"127.0.0.1:{port}")
+            time.sleep(1.0)
+            if self.devices():
+                return
+
+    def run(self, *args: str, _retry: bool = True) -> bytes:
         try:
             return subprocess.run(self._cmd(*args), capture_output=True, check=True, timeout=self.timeout).stdout
         except subprocess.CalledProcessError as e:
             msg = (e.stderr or b"").decode(errors="replace").strip()
-            if "more than one" in msg:
-                msg += f"\n-> pick one with --serial (from: {', '.join(self.devices())})"
+            if _retry and ("offline" in msg or "no devices" in msg or "not found" in msg):
+                print(f"adb: {msg}; reconnecting...")
+                self.revive()
+                return self.run(*args, _retry=False)
+            if _retry and "more than one" in msg and self.serial is None:
+                self.serial = self.devices()[0]      # usually the same LDPlayer seen twice
+                print(f"adb: several devices, using {self.serial} (choose with --serial)")
+                return self.run(*args, _retry=False)
+            if "offline" in msg:
+                msg += ("\n-> restart LDPlayer, then run: & \"" + self.adb_path + "\" kill-server  and try again."
+                        " If it stays offline, close other emulators/phone tools that use adb.")
             elif "no devices" in msg or "not found" in msg:
                 msg += "\n-> is LDPlayer running with ADB debugging set to 'open local connection'?"
             raise RuntimeError(f"adb {' '.join(args)} failed: {msg}") from None

@@ -36,8 +36,15 @@ def cmd_screenshot(a):
     print(f"saved {a.out} ({img.shape[1]}x{img.shape[0]})")
 
 
+def _read(path):
+    img = cv2.imread(path)
+    if img is None:
+        raise SystemExit(f"can't open {path}. Take one first: python -m flybrain.real.calibrate screenshot --out {path}")
+    return img
+
+
 def cmd_check(a):
-    img = cv2.imread(a.image)
+    img = _read(a.image)
     lay = Layout.load(a.layout)
     if not any(OFFICIAL_DIR.glob("*.png")):
         print("downloading the official card pictures (once)...")
@@ -63,7 +70,7 @@ def _roi(img, title):
 
 
 def cmd_pick(a):
-    img = cv2.imread(a.image)
+    img = _read(a.image)
     lay = Layout.load(a.layout)
     steps = [
         ("arena", "the whole arena: from the top edge of the enemy side to the bottom edge of yours (above the cards)"),
@@ -100,7 +107,7 @@ def cmd_pick(a):
 
 
 def cmd_templates(a):
-    img = cv2.imread(a.image)
+    img = _read(a.image)
     lay = Layout.load(a.layout)
     d = Path(a.templates)
     d.mkdir(parents=True, exist_ok=True)

@@ -2,12 +2,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 runs/
-data/
+/data/
 *.npz
 *.pt
 !models/*.pt
 layout.json
 templates/
 
-# card data source
-!flybrain/envs/royale/data/cards.json

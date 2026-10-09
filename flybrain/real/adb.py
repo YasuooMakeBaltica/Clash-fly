@@ -51,6 +51,11 @@ def _ldplayer_dirs() -> list[Path]:
     roots = [Path(f"{d}:\\") for d in "CDEFG"]
     roots += [Path(os.environ[v]) for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA") if v in os.environ]
     out += [r / d for r in roots for d in LDPLAYER_DIRS]
+    for r in roots:                                         # any version, e.g. E:\\LDPlayer\\LDPlayer14
+        try:
+            out += sorted((r / "LDPlayer").glob("LDPlayer*"), reverse=True)
+        except OSError:
+            pass
     return out
 
 

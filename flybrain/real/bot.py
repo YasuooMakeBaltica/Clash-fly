@@ -24,6 +24,7 @@ Supercell's terms of service prohibit automation. Use an alt account.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import warnings
@@ -94,6 +95,19 @@ def draw_overlay(img: np.ndarray, lay: Layout, obs=None, note: str = "") -> np.n
     if note:
         cv2.putText(out, note, (6, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     return out
+
+
+def log_step(path: Path, match_time: float, out: dict) -> None:
+    """One JSON line per decision: what the bot saw and what it did (for looking at real games later)."""
+    obs = out["obs"]
+    rec = dict(t=round(match_time, 1), elixir=obs.elixir, hand=obs.hand, next=obs.next_card,
+               towers={f"{'me' if o == 0 else 'foe'}_{k}{'' if ln is None else ln}": round(v, 3)
+                       for (o, k, ln), v in obs.towers.items()},
+               units=[[u.owner, round(u.x, 1), round(u.y, 1), u.char or u.size] for u in obs.units],
+               enemy_elixir=None if out.get("enemy_elixir") is None else round(out["enemy_elixir"], 1),
+               action=out["action"], card=out["card"], role=out["role"], lane=out["lane"], who=out.get("who"))
+    with open(path, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
 
 
 def troop_summary(units, owner: int) -> str:
@@ -220,7 +234,7 @@ class Bot:
             self.prev_score = score
         role_i, lane = decode(a, heads)
         out = dict(obs=obs, action="wait", card=None, role=ROLES[role_i - 1] if role_i > 0 else None, lane=lane,
-                   slot_xy=None, target_xy=None, who="fly")
+                   slot_xy=None, target_xy=None, who="fly", enemy_elixir=sim.players[1].elixir)
         if self.guard:
             card, lane, out["who"] = guarded_action(view, role_i, lane, self.coach)
         else:
@@ -305,6 +319,9 @@ def main():
                     length = last_seen - bot.battle_start
                     c_me, c_foe, result = bot.end_battle()
                     print(f"battle over after {length:.0f}s: crowns {c_me}-{c_foe} ({result}), {bot.played} cards played")
+                    with open(battle_dir / "log.jsonl", "a") as fh:
+                        fh.write(json.dumps(dict(result=result, crowns=[c_me, c_foe], length=round(length, 1),
+                                                 played=bot.played, deck=bot.deck)) + "\n")
                     learned = bot.learned_deck()
                     if learned and sorted(learned) != sorted(bot.deck):
                         try:
@@ -332,14 +349,17 @@ def main():
                     except ValueError as e:
                         print(f"deck file has a problem, keeping the old deck: {e}")
                 bot.start_battle(t0)
-                print("battle started")
+                battle_dir = debug / time.strftime("battle_%Y%m%d_%H%M%S")
+                battle_dir.mkdir(parents=True, exist_ok=True)
+                print(f"battle started (screenshots and a log go to {battle_dir})")
             last_seen = t0
             out = bot.step(img, t0)
             obs, mt = out["obs"], t0 - bot.battle_start
             print(f"[{mt:5.1f}s] elixir {obs.elixir:4.1f} hand {obs.hand} enemy {troop_summary(obs.units, 1)} "
                   f"mine {troop_summary(obs.units, 0)} -> {out['action']}", flush=True)
+            log_step(battle_dir / "log.jsonl", mt, out)
             if int(mt) % 5 == 0:
-                cv2.imwrite(str(debug / f"frame_{int(mt):03d}.png"), draw_overlay(img, lay, obs, out["action"]))
+                cv2.imwrite(str(battle_dir / f"frame_{int(mt):03d}.png"), draw_overlay(img, lay, obs, out["action"]))
             time.sleep(max(0.0, args.every - (time.time() - t0)))
     except KeyboardInterrupt:
         print("stopped")

@@ -128,3 +128,21 @@ def test_bot_never_sits_on_full_elixir(perception):
             sim.step()
     assert adb.plays and adb.plays[0][3]                 # played (legally) once elixir was nearly full
     assert sim.time >= 10                                # but waited while it wasn't
+
+
+def test_battle_log_lines_are_json(tmp_path):
+    import json
+
+    from flybrain.real.bot import log_step
+    from flybrain.real.perception import Observation, SeenUnit
+
+    obs = Observation(elixir=6.5, hand=["Knight", "Archers", None, "Giant"], next_card="Arrows",
+                      towers={(0, "princess", 0): 1.0, (1, "king", None): 0.9},
+                      units=[SeenUnit(owner=1, x=4.0, y=20.0, size=1, char="HogRider")])
+    out = dict(obs=obs, action="Knight (frontline) left -> tile (4.5,11.0)", card="Knight", role="frontline", lane=0,
+               who="coach:defend", enemy_elixir=3.25)
+    log_step(tmp_path / "log.jsonl", 12.34, out)
+    log_step(tmp_path / "log.jsonl", 13.34, out)
+    lines = [json.loads(ln) for ln in (tmp_path / "log.jsonl").read_text().splitlines()]
+    assert len(lines) == 2 and lines[0]["t"] == 12.3 and lines[0]["who"] == "coach:defend"
+    assert lines[0]["units"] == [[1, 4.0, 20.0, "HogRider"]] and lines[0]["towers"]["foe_king"] == 0.9

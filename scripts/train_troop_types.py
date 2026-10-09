@@ -126,6 +126,8 @@ def main():
     ap.add_argument("--cache", default="runs/troop_crops.npz")
     ap.add_argument("--sprites", help="the dataset's images/segment folder (synthetic close-ups of every troop type)")
     ap.add_argument("--all", action="store_true", help="also train on the validation sessions (final model)")
+    ap.add_argument("--init", help="continue from these weights")
+    ap.add_argument("--warmup", type=float, default=0.1)
     ap.add_argument("--out", default=str(ROOT / "models/troop_types.pt"))
     args = ap.parse_args()
     if args.threads:
@@ -159,9 +161,12 @@ def main():
     props = properties()
 
     net = TypeNet(len(CLASSES))
+    if args.init:
+        net.load_state_dict({k: v.float() if v.is_floating_point() else v
+                             for k, v in torch.load(args.init, weights_only=False)["model"].items()})
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=5e-4)
     steps = args.epochs * math.ceil(len(tr_idx) / args.batch)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=0.1)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=args.warmup)
     out = int(64 * PAD)
     best, t0 = -1.0, time.time()
     for ep in range(args.epochs):
@@ -200,9 +205,13 @@ def main():
         prop = (props[p] == props[t]).all(1).mean()
         print(f"epoch {ep + 1}: loss {tot / n:.3f}; validation type accuracy {acc:.3f}, coach properties right "
               f"{prop:.3f} ({len(t)} troops) ({time.time() - t0:.0f}s)", flush=True)
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        ckpt = dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
+                    classes=CLASSES, crop=TypeNet.CROP, val_acc=float(acc), val_props=float(prop), epoch=ep + 1)
+        torch.save(ckpt, str(args.out).replace(".pt", "_last.pt"))
         if acc > best:
             best = acc
-            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            torch.save(ckpt, args.out).parent.mkdir(parents=True, exist_ok=True)
             torch.save(dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
                             classes=CLASSES, crop=TypeNet.CROP, val_acc=float(acc), val_props=float(prop)), args.out)
 

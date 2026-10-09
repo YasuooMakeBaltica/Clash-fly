@@ -196,6 +196,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-3)
+    ap.add_argument("--warmup", type=float, default=0.1, help="share of steps spent warming up the learning rate")
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0, help="use only this many training frames (quick tests)")
@@ -230,7 +231,7 @@ def main():
     print(f"model: {sum(p.numel() for p in net.parameters()) / 1e6:.2f}M parameters", flush=True)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     steps = args.epochs * math.ceil(len(train) / args.batch)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=0.1)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=args.warmup)
     best, t0 = -1.0, time.time()
     for ep in range(args.epochs):
         tot = np.zeros(3)
@@ -256,12 +257,13 @@ def main():
         print(f"epoch {ep + 1}: loss heat {tot[0] / n:.3f} type {tot[1] / n:.3f}; validation recall {r['recall']:.3f} "
               f"precision {r['precision']:.3f} type accuracy {r['type_acc']:.3f} ({r['troops']} troops) "
               f"({time.time() - t0:.0f}s)", flush=True)
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        ckpt = dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
+                    classes=CLASSES, width=args.width, val=r, epoch=ep + 1, ground=0.0)
+        torch.save(ckpt, str(args.out).replace(".pt", "_last.pt"))      # resumable even if the run is cut short
         if score > best:
             best = score
-            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-            torch.save(dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
-                            classes=CLASSES,
-                            width=args.width, val=r, epoch=ep + 1, ground=0.0), args.out)
+            torch.save(ckpt, args.out)
             print(f"  saved {args.out}", flush=True)
 
 

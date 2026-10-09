@@ -69,6 +69,13 @@ def record(args, fly_deck):
     return np.concatenate(X), np.concatenate(M), np.concatenate(A), np.concatenate(ACT)
 
 
+def save(agent, args, fly_deck):
+    """Checkpoint (after every epoch / DAgger round, so a cut-short run keeps its progress)."""
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    saved_args = {k: v for k, v in vars(args).items() if k != "device"}
+    torch.save(dict(agent=agent.state_dict(), args=saved_args, fly_deck=fly_deck), args.out)
+
+
 def record_on_policy(agent, args, fly_deck, matches, seed, follow_coach=0.0):
     """DAgger: the brain plays (taking the coach's move with probability ``follow_coach``) and every
     situation it ends up in is labelled with what the coach would do there."""
@@ -211,6 +218,7 @@ def main():
         teach_epoch(agent, X, M, A, ACT, train[keep], B, rng)
         log.append(dict(stage=f"epoch {ep + 1}", agreement=agreement(agent, X[test], M[test], A[test])))
         print(f"   epoch {ep + 1}: agreement {log[-1]['agreement']}  ({time.time() - t0:.0f}s)", flush=True)
+        save(agent, args, fly_deck)
 
     for k in range(args.dagger_rounds):
         # The brain's own games reach situations the coach's games never show; label them with the coach.
@@ -230,10 +238,9 @@ def main():
                         on_policy=agreement(agent, Xn, Mn, An)))
         print(f"   after round {k + 1}: coach-data agreement {log[-1]['agreement']}, "
               f"on its own games {log[-1]['on_policy']}  ({time.time() - t0:.0f}s)", flush=True)
+        save(agent, args, fly_deck)
 
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    saved_args = {k: v for k, v in vars(args).items() if k != "device"}
-    torch.save(dict(agent=agent.state_dict(), args=saved_args, fly_deck=fly_deck), args.out)
+    save(agent, args, fly_deck)
     print(f"   saved {args.out}")
 
     print("3. testing")

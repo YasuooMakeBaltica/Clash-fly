@@ -144,8 +144,11 @@ class ClashEnv:
         p0, p1 = sim.players
         return _tower_loss(sim, 1), _tower_loss(sim, 0), p0.crowns, p1.crowns, p0.leaked
 
-    def step(self, actions: np.ndarray, record: bool = False):
-        """Apply brain actions, advance one decision interval. Returns (obs, reward, done)."""
+    def step(self, actions: np.ndarray, record: bool = False, on_tick=None):
+        """Apply brain actions, advance one decision interval. Returns (obs, reward, done).
+
+        ``on_tick(i, sim)`` is called after every simulation tick (for replays).
+        """
         actions = np.asarray(actions).reshape(self.batch, 2)
         reward = np.zeros(self.batch, dtype=np.float32)
         for i, sim in enumerate(self.sims):
@@ -163,6 +166,8 @@ class ClashEnv:
                 self.history[i].append(dict(t=round(sim.time, 2), card=card, lane=lane, played=played))
             for _ in range(int(round(self.decision_every / sim.dt))):
                 sim.step()
+                if on_tick is not None:
+                    on_tick(i, sim)
                 if sim.done:
                     break
             dealt, taken, c0, c1, leaked = self._score(sim)

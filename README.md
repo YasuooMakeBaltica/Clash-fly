@@ -71,11 +71,45 @@ population comes out empty or wrong, check the column values against
 | 1 | Load connectome, extract PN/KC/MBON/DAN/APL | `python scripts/extract_populations.py` |
 | 2 | Spiking sim shows sensible firing | `python scripts/test_sim.py` |
 | 3–4 | Catch-the-ball + dopamine plasticity | `python scripts/train_catch.py` |
-| 5 | Clash Royale perception (LDPlayer) | not started; needs a local session |
+| 5 | Clash Royale simulator + coaching | `python scripts/train_clash.py` |
+| 6 | Clash Royale perception (LDPlayer) | not started; needs a local session |
 
 `train_catch.py` writes `runs/catch/learning_curve.{csv,png}` and
 `weights.pt`. Useful flags: `--device cuda`, `--batch 64` (parallel games),
 `--mode bidirectional`, `--encoding relative`, `--shaping 0.3`.
+
+## Clash Royale (simulated)
+
+Before touching the real game, the brain learns in a simplified simulator
+(`flybrain/envs/clash/`): the 18×32 arena with river and bridges, princess
+and king towers, elixir (double in the last minute), an 8-card starter deck
+cycling through a 4-card hand, troops that walk their lane, lock onto the
+nearest target and fight, delayed area spells, crowns and a 3-minute match.
+Stats are approximate. No collisions, air units or overtime.
+
+**Coach.** `strategy.py` holds a scripted coach that plays basic strategy:
+finish towers with spells, defend first with the right counter (tank →
+Mini P.E.K.K.A, swarm → Arrows, melee → Goblins, ranged → Knight), make
+positive spell trades, counter-push with survivors, punish a tank dropped at
+the back by attacking the other lane, and never sit at full elixir. In the
+simulator it beats a random bot ~99% and a basic bot ~95% of the time.
+
+**What the brain sees and does.** 62 situation channels (elixir level, cards
+ready, threat size and type per lane, own pushes, tower health, spell value)
+drive PN groups. MBONs are split into two voting sets: which card (or wait)
+and which lane. Placement inside the lane uses the same helper as the coach.
+
+**Training** (`scripts/train_clash.py`):
+1. *Coaching:* in each situation the coach's move is paired with reward
+   dopamine, so KC→MBON synapses for other moves weaken. Moves actually played
+   shift from the coach's to the brain's own as coaching goes on.
+2. *Practice:* the brain plays alone against random → basic → coach bots,
+   moving up after winning 60% of recent matches, learning from tower damage,
+   crowns and wins.
+
+`scripts/record_clash.py --brain runs/clash/brain.pt` records a match
+(positions, elixir, the brain's votes and what the coach would have done) for
+the replay viewer.
 
 ## Layout
 
@@ -86,6 +120,7 @@ flybrain/
   plasticity.py   three-factor dopamine rule with eligibility traces
   agent.py        state -> PN encoding, MBON-group voting, reward -> DANs
   envs/catch.py   batched catch-the-ball
+  envs/clash/     Clash Royale simulator, coach and bots, brain environment
 scripts/          milestone scripts
 tests/
 ```

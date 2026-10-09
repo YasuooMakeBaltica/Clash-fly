@@ -1,0 +1,373 @@
+<title>Beat the Fly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: phone-shaped arena with your hand under it; the fly's live readout beside it. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --fg: #17212b; --muted: #5a6774; --line: #d6dce2; --soft: #e7ebef;
+  --grass: #cfe3c4; --grass-2: #c4dbb8; --river: #8cc2e6; --bridge: #b89567;
+  --me: #2f5fd0; --foe: #c8443b; --elixir: #b03cc8; --gold: #d29a1c; --good: #2c8a4c; --bad: #b8403a;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10161c; --panel: #17202a; --fg: #e3e9ef; --muted: #93a0ad; --line: #2a3640; --soft: #212b35;
+    --grass: #2c3e2a; --grass-2: #283825; --river: #2f6a92; --bridge: #7c6142;
+    --me: #7d9df2; --foe: #ef7f76; --elixir: #d27be6; --gold: #ebb84a; --good: #5cc07f; --bad: #ef7f76; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10161c; --panel: #17202a; --fg: #e3e9ef; --muted: #93a0ad; --line: #2a3640; --soft: #212b35;
+  --grass: #2c3e2a; --grass-2: #283825; --river: #2f6a92; --bridge: #7c6142;
+  --me: #7d9df2; --foe: #ef7f76; --elixir: #d27be6; --gold: #ebb84a; --good: #5cc07f; --bad: #ef7f76; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 16px; }
+header h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(28px, 5vw, 40px); line-height: 1.1; margin: 0; letter-spacing: -0.01em; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 70ch; }
+.stage { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 820px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.eyebrow { font: 500 11px var(--f-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.crowns { font: 700 22px var(--f-display); font-variant-numeric: tabular-nums; }
+.crowns .me { color: var(--me); } .crowns .foe { color: var(--foe); }
+.clock { font: 600 18px var(--f-mono); font-variant-numeric: tabular-nums; }
+.clock.double { color: var(--elixir); }
+.arena-box { position: relative; }
+#arena { width: 100%; max-width: 100%; aspect-ratio: 18 / 32; display: block; border-radius: 8px; touch-action: manipulation; cursor: crosshair; }
+.overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; text-align: center; padding: 24px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent); border-radius: 8px; }
+.overlay h2 { font: 700 28px var(--f-display); margin: 0; }
+.overlay p { margin: 0; color: var(--muted); max-width: 34ch; }
+.btn { font: 600 15px var(--f-body); background: var(--me); color: #fff; border: 0; border-radius: 10px; padding: 10px 22px; cursor: pointer; justify-self: center; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); font-size: 13px; padding: 6px 12px; }
+.btn:focus-visible, .card:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.elixir { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.ebar { height: 14px; border-radius: 4px; background: var(--soft); display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; overflow: hidden; }
+.ebar i { background: var(--soft); position: relative; }
+.ebar i.on { background: var(--elixir); }
+.ebar i.part { background: linear-gradient(90deg, var(--elixir) var(--p), var(--soft) var(--p)); opacity: 0.6; }
+.enum { font: 700 18px var(--f-mono); color: var(--elixir); min-width: 2ch; text-align: right; }
+.hand { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 0.7fr); gap: 6px; }
+.card { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px;
+  display: grid; gap: 2px; text-align: center; cursor: pointer; min-width: 0; }
+.card b { font-weight: 600; font-size: 12px; overflow-wrap: break-word; hyphens: auto; line-height: 1.2; }
+.card span { font: 600 13px var(--f-mono); color: var(--elixir); }
+.card small { font-size: 10px; color: var(--muted); }
+.card.sel { border-color: var(--me); box-shadow: inset 0 0 0 2px var(--me); }
+.card.poor { opacity: 0.45; }
+.card.next { cursor: default; border-style: dashed; color: var(--muted); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; min-height: 1.5em; }
+.decision .did { font: 600 16px var(--f-body); }
+.votes { display: grid; grid-template-columns: minmax(0, 120px) 1fr 40px; gap: 4px 8px; align-items: center; font: 12px var(--f-mono); }
+.votes .bar { height: 10px; border-radius: 3px; background: var(--soft); overflow: hidden; }
+.votes .bar i { display: block; height: 100%; background: var(--foe); opacity: 0.5; }
+.votes .win .bar i { opacity: 1; } .votes .win { font-weight: 600; } .votes .off { opacity: 0.35; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 560px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips span { font: 12px var(--f-mono); background: var(--soft); border-radius: 6px; padding: 2px 7px; }
+.chips span.hot { background: color-mix(in srgb, var(--me) 22%, var(--soft)); }
+.log { font: 12px var(--f-mono); display: grid; gap: 3px; max-height: 180px; overflow-y: auto; }
+.log div { display: grid; grid-template-columns: 4ch 1fr; gap: 8px; }
+.log .me { color: var(--me); } .log .foe { color: var(--foe); } .log .tw { color: var(--gold); font-weight: 600; }
+.note { color: var(--muted); font-size: 13px; margin: 0; max-width: 72ch; }
+.record { font: 13px var(--f-mono); color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Beat the Fly</h1>
+    <p>You are blue. The red side is played by a simulated fruit-fly mushroom body that learned basic Clash Royale from a coach and then practised against bots. Pick a card, then tap your half of the arena to drop it. Spells can go anywhere.</p>
+  </header>
+
+  <div class="stage">
+    <section class="panel" aria-label="Arena">
+      <div class="top">
+        <span class="crowns"><span class="me" id="cr-me">0</span> – <span class="foe" id="cr-foe">0</span></span>
+        <span class="clock" id="clock">3:00</span>
+        <button class="btn ghost" id="pause" disabled>Pause</button>
+      </div>
+      <div class="arena-box">
+        <canvas id="arena" width="720" height="1280" aria-label="Arena. Select a card, then tap to deploy."></canvas>
+        <div class="overlay" id="overlay">
+          <h2 id="ov-title">Ready?</h2>
+          <p id="ov-text">Three minutes. Take more crowns than the fly. The last minute is double elixir.</p>
+          <button class="btn" id="start">Start match</button>
+        </div>
+      </div>
+      <div class="elixir"><div class="ebar" id="ebar"></div><span class="enum" id="enum">5</span></div>
+      <div class="hand" id="hand"></div>
+      <p class="hint" id="hint">Pick a card (or press 1–4).</p>
+    </section>
+
+    <div style="display:grid; gap:16px; min-width:0">
+      <section class="panel" aria-label="The fly's last decision">
+        <p class="eyebrow" id="dec-title">The fly decides once per second</p>
+        <div class="decision"><span class="did" id="did">Waiting for the match to start</span></div>
+        <div class="cols">
+          <div style="display:grid; gap:8px; min-width:0">
+            <p class="eyebrow">Card vote (output neuron spikes)</p>
+            <div class="votes" id="card-votes"></div>
+          </div>
+          <div style="display:grid; gap:8px; min-width:0">
+            <p class="eyebrow">Lane vote</p>
+            <div class="votes" id="lane-votes"></div>
+            <p class="eyebrow" style="margin-top:6px">Kenyon cells active</p>
+            <div class="record" id="kc">–</div>
+            <p class="eyebrow" style="margin-top:6px">Fly's elixir</p>
+            <div class="record" id="fly-elixir">5.0</div>
+          </div>
+        </div>
+        <p class="eyebrow">What the fly sees</p>
+        <div class="chips" id="sees"></div>
+      </section>
+      <section class="panel" aria-label="Match log">
+        <div class="top"><p class="eyebrow">Match log</p><span class="record" id="record"></span></div>
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+  </div>
+  <p class="note">Simplified simulator with approximate starter-deck stats: no collisions, no air units, no overtime. Placement inside a lane is done for the fly by a fixed helper; it chooses the card and the lane. It does not learn during your match.</p>
+</div>
+
+<script>
+/*CORE*/
+</script>
+<script>
+const BRAIN_DATA = /*BRAIN*/null;
+const C = ClashCore;
+const $ = (id) => document.getElementById(id);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SHORT = { "Knight": "Kn", "Archers": "Ar", "Giant": "Gi", "Musketeer": "Mu", "Mini P.E.K.K.A": "MP", "Goblins": "Go", "Fireball": "Fb", "Arrows": "Aw" };
+const RAD = { "Giant": 0.85, "Knight": 0.6, "Mini P.E.K.K.A": 0.6, "Musketeer": 0.55, "Archers": 0.5, "Goblins": 0.48 };
+const brain = new C.Brain(BRAIN_DATA, (Date.now() & 0xffff) + 1);
+const G = { sim: null, running: false, paused: false, sel: null, acc: 0, last: 0, prev: new Map(), nextDecision: 1, flash: null, record: { w: 0, l: 0, d: 0 } };
+try { const r = JSON.parse(localStorage.getItem("beat-the-fly-record") || "null"); if (r) G.record = r; } catch (e) {}
+for (let i = 0; i < 10; i++) $("ebar").append(document.createElement("i"));
+
+function fmt(t) { const s = Math.max(0, Math.ceil(t)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+function showRecord() { const r = G.record; $("record").textContent = `you ${r.w}W ${r.d}D ${r.l}L vs the fly`; }
+showRecord();
+
+// ------------------------------------------------------------ match flow
+function start() {
+  G.sim = new C.Sim((Math.random() * 2 ** 31) | 0);
+  G.running = true; G.paused = false; G.sel = null; G.acc = 0; G.nextDecision = 1; G.prev = new Map(); G.last = 0;
+  $("overlay").hidden = true; $("pause").disabled = false; $("pause").textContent = "Pause";
+  $("log").innerHTML = "";
+  renderHand(); decideFly();
+}
+function end() {
+  G.running = false; $("pause").disabled = true;
+  const w = G.sim.winner;
+  if (w === 0) G.record.w++; else if (w === 1) G.record.l++; else G.record.d++;
+  try { localStorage.setItem("beat-the-fly-record", JSON.stringify(G.record)); } catch (e) {}
+  showRecord();
+  const [a, b] = G.sim.players.map((p) => p.crowns);
+  $("ov-title").textContent = w === 0 ? "You win" : w === 1 ? "The fly wins" : "Draw";
+  $("ov-text").textContent = `${a} – ${b} in crowns.` + (w === 1 ? " A fly brain with about 2,500 Kenyon cells beat you." : "");
+  $("start").textContent = "Play again";
+  $("overlay").hidden = false;
+}
+$("start").onclick = start;
+$("pause").onclick = () => { G.paused = !G.paused; $("pause").textContent = G.paused ? "Resume" : "Pause"; };
+
+function decideFly() {
+  const sim = G.sim, view = new C.View(sim, 1);
+  const f = C.features(view), mask = C.cardMask(view);
+  const r = brain.decide(f, mask, 0);
+  let did = "Wait";
+  if (r.card > 0 && sim.canPlay(1, r.card - 1)) {
+    const [x, y] = C.place(view, r.card - 1, r.lane);
+    if (sim.play(1, r.card - 1, x, y)) { did = `Play ${C.DECK[r.card - 1].name}, ${r.lane ? "right" : "left"} lane`; addLog(1, r.card - 1, x); }
+  }
+  renderBrain(r, f, mask, did);
+}
+
+// --------------------------------------------------------------- input
+function selectCard(slot) {
+  if (!G.running) return;
+  const c = G.sim.players[0].hand[slot];
+  G.sel = G.sel === c ? null : c;
+  renderHand();
+}
+document.addEventListener("keydown", (e) => { if (["1", "2", "3", "4"].includes(e.key)) selectCard(+e.key - 1); if (e.key === "Escape") { G.sel = null; renderHand(); } });
+$("arena").addEventListener("pointerdown", (e) => {
+  if (!G.running || G.paused || G.sel === null) return;
+  const rect = e.target.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * 18, y = 32 - (e.clientY - rect.top) / rect.height * 32;
+  const sim = G.sim, c = G.sel;
+  if (!sim.validPosition(0, c, x, y)) { $("hint").textContent = "You can only drop troops on your side of the river."; return; }
+  if (!sim.canPlay(0, c)) { $("hint").textContent = `Not enough elixir for ${C.DECK[c].name}.`; return; }
+  sim.play(0, c, x, y); addLog(0, c, x);
+  G.flash = { x, y, t: 0.4 };
+  G.sel = null; renderHand();
+});
+
+// ------------------------------------------------------------- render
+function renderHand() {
+  const hand = $("hand"); hand.innerHTML = "";
+  if (!G.sim) return;
+  const p = G.sim.players[0];
+  p.hand.forEach((c, i) => {
+    const cd = C.DECK[c];
+    const b = document.createElement("button");
+    b.className = "card" + (G.sel === c ? " sel" : "") + (cd.cost > p.elixir ? " poor" : "");
+    b.innerHTML = `<b></b><span>${cd.cost}</span><small>${i + 1}</small>`;
+    b.querySelector("b").textContent = cd.name;
+    b.onclick = () => selectCard(i);
+    hand.append(b);
+  });
+  const nx = document.createElement("div"); nx.className = "card next";
+  nx.innerHTML = `<small>next</small><b></b><span>${C.DECK[p.queue[0]].cost}</span>`;
+  nx.querySelector("b").textContent = C.DECK[p.queue[0]].name;
+  hand.append(nx);
+  $("hint").textContent = G.sel === null ? "Pick a card (or press 1–4)." :
+    C.DECK[G.sel].kind === "spell" ? `Tap anywhere to cast ${C.DECK[G.sel].name}.` : `Tap your half of the arena to drop ${C.DECK[G.sel].name}.`;
+}
+function renderElixir() {
+  const e = G.sim ? G.sim.players[0].elixir : 5;
+  [...$("ebar").children].forEach((el, i) => {
+    el.className = i < Math.floor(e) ? "on" : i === Math.floor(e) ? "part" : "";
+    el.style.setProperty("--p", `${(e - Math.floor(e)) * 100}%`);
+  });
+  $("enum").textContent = Math.floor(e);
+  // keep affordability shading current without rebuilding every frame
+  const p = G.sim && G.sim.players[0];
+  if (p) [...$("hand").children].slice(0, 4).forEach((b, i) => b.classList.toggle("poor", C.DECK[p.hand[i]].cost > p.elixir));
+}
+function renderBrain(r, f, mask, did) {
+  const t = G.sim.time;
+  $("dec-title").textContent = `The fly's decision at ${fmt(C.MATCH_TIME - t)} left`;
+  $("did").textContent = did;
+  const name = (i) => i === 0 ? "Wait" : C.DECK[i - 1].name;
+  const cv = $("card-votes"); cv.innerHTML = "";
+  const mx = Math.max(0.05, ...r.cardVotes);
+  r.cardVotes.forEach((v, i) => {
+    const cls = (mask[i] ? "" : "off ") + (i === r.card ? "win" : "");
+    cv.insertAdjacentHTML("beforeend", `<span class="${cls}"></span><div class="bar ${cls}"><i style="width:${v / mx * 100}%"></i></div><span class="${cls}">${v.toFixed(2)}</span>`);
+    cv.children[cv.children.length - 3].textContent = name(i);
+  });
+  const lv = $("lane-votes"); lv.innerHTML = "";
+  const lm = Math.max(0.05, ...r.laneVotes);
+  r.laneVotes.forEach((v, i) => {
+    const cls = r.card !== 0 && i === r.lane ? "win" : "";
+    lv.insertAdjacentHTML("beforeend", `<span class="${cls}">${i ? "Right" : "Left"}</span><div class="bar ${cls}"><i style="width:${v / lm * 100}%"></i></div><span class="${cls}">${v.toFixed(2)}</span>`);
+  });
+  $("kc").textContent = `${(r.kcActive * 100).toFixed(1)}% of ${BRAIN_DATA.n_kc}`;
+  $("fly-elixir").textContent = G.sim.players[1].elixir.toFixed(1);
+  const sees = $("sees"); sees.innerHTML = "";
+  f.forEach((on, i) => {
+    if (!on) return;
+    const s = C.CHANNELS[i], sp = document.createElement("span"); sp.textContent = s;
+    if (/threat|enemy (tank|melee|ranged|swarm)/.test(s) && !/no threat/.test(s)) sp.className = "hot";
+    sees.append(sp);
+  });
+}
+function addLog(player, c, x) {
+  const d = document.createElement("div"); d.className = player === 0 ? "me" : "foe";
+  d.innerHTML = `<span>${fmt(C.MATCH_TIME - G.sim.time)}</span><span></span>`;
+  d.lastChild.textContent = `${player === 0 ? "You" : "Fly"}: ${C.DECK[c].name} (${x < 9 ? "left" : "right"})`;
+  $("log").prepend(d);
+}
+function logTowers(before) {
+  for (const e of G.sim.events.slice(before)) if (e.kind === "tower") {
+    const d = document.createElement("div"); d.className = "tw";
+    d.innerHTML = `<span>${fmt(C.MATCH_TIME - e.t)}</span><span></span>`;
+    d.lastChild.textContent = `${e.player === 0 ? "You destroy" : "The fly destroys"} a ${e.tower} tower`;
+    $("log").prepend(d);
+  }
+}
+
+function drawArena(w) {
+  const c = $("arena"), g = c.getContext("2d"), S = c.width / 18;
+  const X = (x) => x * S, Y = (y) => (32 - y) * S;
+  g.clearRect(0, 0, c.width, c.height);
+  for (let r = 0; r < 32; r++) { g.fillStyle = r % 2 ? css("--grass") : css("--grass-2"); g.fillRect(0, r * S, c.width, S); }
+  g.fillStyle = css("--river"); g.fillRect(0, Y(17), c.width, 2 * S);
+  g.fillStyle = css("--bridge"); for (const lx of C.LANE_X) g.fillRect(X(lx - 1), Y(17.3), 2 * S, 2.6 * S);
+  const sim = G.sim;
+  if (!sim) return;
+  // deploy zone hint
+  if (G.sel !== null && C.DECK[G.sel].kind === "troop") {
+    g.fillStyle = css("--foe"); g.globalAlpha = 0.16;
+    for (let lane = 0; lane < 2; lane++) {
+      const pocket = !(sim.tower(1, "princess", lane).hp > 0);
+      const x0 = lane === 0 ? 0 : 9;
+      g.fillRect(X(x0), 0, 9 * S, Y(pocket ? 20 : 14.5));
+    }
+    g.globalAlpha = 1;
+  }
+  for (const t of sim.towers) {
+    const half = t.kind === "king" ? 2 : 1.5, col = t.owner === 0 ? css("--me") : css("--foe");
+    if (!(t.hp > 0)) {
+      g.fillStyle = css("--soft"); g.globalAlpha = 0.7; g.fillRect(X(t.x - half), Y(t.y + half), 2 * half * S, 2 * half * S); g.globalAlpha = 1;
+      g.strokeStyle = css("--muted"); g.lineWidth = 3; g.beginPath();
+      g.moveTo(X(t.x - half), Y(t.y + half)); g.lineTo(X(t.x + half), Y(t.y - half)); g.moveTo(X(t.x + half), Y(t.y + half)); g.lineTo(X(t.x - half), Y(t.y - half)); g.stroke();
+      continue;
+    }
+    g.fillStyle = col; g.globalAlpha = t.kind === "king" && !t.active ? 0.55 : 0.92;
+    g.beginPath(); g.roundRect(X(t.x - half), Y(t.y + half), 2 * half * S, 2 * half * S, 8); g.fill(); g.globalAlpha = 1;
+    g.fillStyle = "#ffffff"; g.font = `600 ${S * 0.55}px ${css("--f-mono")}`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(Math.ceil(t.hp), X(t.x), Y(t.y));
+    bar(g, X(t.x - half), Y(t.y + half) - S * 0.45, 2 * half * S, t.hp / t.max_hp, col, S);
+  }
+  for (const s of sim.spells) {
+    g.strokeStyle = s.owner === 0 ? css("--me") : css("--foe"); g.lineWidth = 4; g.setLineDash([10, 8]);
+    g.beginPath(); g.arc(X(s.x), Y(s.y), s.card.radius * S, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+    g.fillStyle = g.strokeStyle; g.font = `600 ${S * 0.6}px ${css("--f-mono")}`; g.textAlign = "center"; g.fillText(s.card.name, X(s.x), Y(s.y));
+  }
+  for (const u of sim.units) {
+    const p = G.prev.get(u.uid);
+    const x = p ? p[0] + (u.x - p[0]) * w : u.x, y = p ? p[1] + (u.y - p[1]) * w : u.y;
+    const r = (RAD[u.card.name] || 0.5) * S, col = u.owner === 0 ? css("--me") : css("--foe");
+    g.globalAlpha = u.deploy > 0 ? 0.45 : 1;
+    g.fillStyle = col; g.beginPath(); g.arc(X(x), Y(y), r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#ffffff"; g.font = `600 ${Math.max(14, r * 0.9)}px ${css("--f-mono")}`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(SHORT[u.card.name] || "?", X(x), Y(y) + 1);
+    g.globalAlpha = 1;
+    if (u.hp < u.card.hp) bar(g, X(x) - r, Y(y) - r - S * 0.35, 2 * r, u.hp / u.card.hp, col, S * 0.7);
+  }
+  if (G.flash) {
+    g.strokeStyle = css("--me"); g.lineWidth = 3; g.globalAlpha = Math.max(0, G.flash.t / 0.4);
+    g.beginPath(); g.arc(X(G.flash.x), Y(G.flash.y), S * (1.6 - G.flash.t * 2), 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
+  }
+}
+function bar(g, x, y, w, frac, col, S) { g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(x, y, w, S * 0.22); g.fillStyle = col; g.fillRect(x, y, w * Math.max(0, frac), S * 0.22); }
+
+// ---------------------------------------------------------------- loop
+function frame(now) {
+  const dt = G.last ? Math.min(0.25, (now - G.last) / 1000) : 0; G.last = now;
+  if (G.running && !G.paused) {
+    G.acc += dt;
+    while (G.acc >= C.DT && G.running) {
+      G.acc -= C.DT;
+      G.prev = new Map(G.sim.units.map((u) => [u.uid, [u.x, u.y]]));
+      const before = G.sim.events.length;
+      G.sim.step();
+      logTowers(before);
+      if (G.sim.time >= G.nextDecision - 1e-9 && !G.sim.done) { G.nextDecision += 1; decideFly(); }
+      if (G.sim.done) end();
+    }
+    if (G.flash) { G.flash.t -= dt; if (G.flash.t <= 0) G.flash = null; }
+    $("cr-me").textContent = G.sim.players[0].crowns; $("cr-foe").textContent = G.sim.players[1].crowns;
+    const left = C.MATCH_TIME - G.sim.time;
+    $("clock").textContent = fmt(left); $("clock").classList.toggle("double", G.sim.time >= C.DOUBLE_ELIXIR_AT);
+    renderElixir();
+    // hand changes after a play or cycle
+    const key = G.sim.players[0].hand.join(",") + "|" + G.sel;
+    if (key !== G.handKey) { G.handKey = key; renderHand(); }
+  }
+  drawArena(G.running ? Math.min(1, G.acc / C.DT) : 1);
+  requestAnimationFrame(frame);
+}
+renderHand(); drawArena(1); requestAnimationFrame(frame);
+new MutationObserver(() => drawArena(1)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>

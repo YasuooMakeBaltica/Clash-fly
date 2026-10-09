@@ -108,9 +108,10 @@ class Player:
 class ClashSim:
     dt = 0.1
 
-    def __init__(self, seed: int | None = None, deck: tuple[Card, ...] = DECK):
+    def __init__(self, seed: int | None = None, deck: tuple[Card, ...] = DECK, shuffle_updates: bool = True):
         self.rng = np.random.default_rng(seed)
         self.deck = deck
+        self.shuffle_updates = shuffle_updates
         self.reset()
 
     # ------------------------------------------------------------- set-up
@@ -211,11 +212,11 @@ class ClashSim:
         self.spells = [s for s in self.spells if s.delay > 0]
 
         # Random update order so neither player systematically hits first.
-        for i in self.rng.permutation(len(self.units)):
+        for i in self._order(len(self.units)):
             u = self.units[i]
             if u.alive:
                 self._update_unit(u, dt)
-        for i in self.rng.permutation(len(self.towers)):
+        for i in self._order(len(self.towers)):
             t = self.towers[i]
             if t.alive and t.active:
                 self._update_tower(t, dt)
@@ -223,6 +224,9 @@ class ClashSim:
 
         if self.time >= MATCH_TIME - 1e-9 and not self.done:
             self._finish()
+
+    def _order(self, n: int):
+        return self.rng.permutation(n) if self.shuffle_updates else range(n)
 
     def _resolve_spell(self, s: Spell) -> None:
         for u in self.units:

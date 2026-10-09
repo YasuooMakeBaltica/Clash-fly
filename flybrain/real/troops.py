@@ -164,15 +164,24 @@ def frame_box(lay: Layout, w: int, h: int) -> tuple[float, float, float, float]:
     return fx0, fy0, fx0 + fw, fy0 + fh
 
 
-def arena_crop(img: np.ndarray, lay: Layout) -> np.ndarray:
-    """The dataset-frame region of a screenshot, resized to the net's input (BGR uint8, 448x288)."""
+def arena_crop(img: np.ndarray, lay: Layout, scale: float = SCALE, size=INPUT_SIZE) -> np.ndarray:
+    """The dataset-frame region of a screenshot at ``scale`` x the 568x896 frame size
+    (default: the detector's input, 448x288 after padding)."""
     h, w = img.shape[:2]
     fx0, fy0, fx1, fy1 = frame_box(lay, w, h)
     sx, sy = (fx1 - fx0) / FRAME_SIZE[0], (fy1 - fy0) / FRAME_SIZE[1]
-    # affine map from net-input pixels to screenshot pixels
-    m = np.array([[sx / SCALE, 0, fx0], [0, sy / SCALE, fy0]], np.float32)
-    return cv2.warpAffine(img, m, INPUT_SIZE, flags=cv2.WARP_INVERSE_MAP | cv2.INTER_AREA,
+    # affine map from output pixels to screenshot pixels
+    m = np.array([[sx / scale, 0, fx0], [0, sy / scale, fy0]], np.float32)
+    return cv2.warpAffine(img, m, size, flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
                           borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+
+
+def net_input(frame: np.ndarray) -> np.ndarray:
+    """568x896 frame -> the detector's 448x288 input, resized exactly like the training cache."""
+    out = np.zeros((INPUT_SIZE[1], INPUT_SIZE[0], 3), np.uint8)
+    small = cv2.resize(frame, (int(FRAME_SIZE[0] * SCALE), int(FRAME_SIZE[1] * SCALE)), interpolation=cv2.INTER_AREA)
+    out[:small.shape[0], :small.shape[1]] = small
+    return out
 
 
 def frame_to_tile(u: float, v: float) -> tuple[float, float]:
@@ -188,16 +197,29 @@ def to_tensor(crops: np.ndarray) -> torch.Tensor:
 
 
 # ----------------------------------------------------------------- detector
+def _floats(state: dict) -> dict:
+    return {k: v.float() if v.is_floating_point() else v for k, v in state.items()}
+
+
 class TroopDetector:
     """Drop-in for perception.BadgeDetector: ``detect(img, layout) -> list[SeenUnit]`` with troop types."""
 
-    def __init__(self, weights: str | Path, threshold: float = 0.35, device: str = "cpu"):
+    def __init__(self, weights: str | Path, threshold: float = 0.35, device: str = "cpu", types: str | Path | None = None):
+        """``types``: close-up type classifier weights (default: troop_types.pt next to ``weights`` if present)."""
         ckpt = torch.load(weights, map_location=device, weights_only=False)
         self.classes = ckpt["classes"]
         self.net = TroopNet(len(self.classes), ckpt.get("width", 32)).to(device).eval()
-        self.net.load_state_dict({k: v.float() if v.is_floating_point() else v for k, v in ckpt["model"].items()})
+        self.net.load_state_dict(_floats(ckpt["model"]))
         self.threshold, self.device = threshold, device
         self.ground = ckpt.get("ground", 0.0)       # extra shift (tiles) from the predicted point to the feet
+        types = Path(types) if types else Path(weights).with_name("troop_types.pt")
+        self.typer = None
+        if types.exists():
+            t = torch.load(types, map_location=device, weights_only=False)
+            if list(t["classes"]) == list(self.classes):
+                self.typer = TypeNet(len(self.classes)).to(device).eval()
+                self.typer.load_state_dict(_floats(t["model"]))
+                self.type_crop = t.get("crop", TypeNet.CROP)
 
     @torch.no_grad()
     def raw(self, crop: np.ndarray):
@@ -217,15 +239,30 @@ class TroopDetector:
             out.append((int(side), float(u), float(v), float(heat[side, gy, gx]), k, float(cls[k, gy, gx])))
         return out
 
+    @torch.no_grad()
+    def classify(self, frame: np.ndarray, points) -> np.ndarray:
+        """Type probabilities (N, K) for points [(u, v)] of a full-size 568x896 frame."""
+        crops = frame_crops(frame, points, self.type_crop)
+        return torch.softmax(self.typer(to_tensor(crops).to(self.device)), 1).cpu().numpy()
+
     def detect(self, img: np.ndarray, lay: Layout, extra_ignore=None):
         from .perception import SeenUnit
 
-        heat, cls, off = self.raw(arena_crop(img, lay))
+        frame = arena_crop(img, lay, 1.0, FRAME_SIZE)        # the 568x896 dataset-frame view of the screen
+        heat, cls, off = self.raw(net_input(frame))
+        found = [p for p in self.peaks(heat, cls, off)
+                 if -0.5 <= frame_to_tile(p[1], p[2])[0] <= 18.5 and -0.5 <= frame_to_tile(p[1], p[2])[1] <= 32.5]
+        kinds = [p[4] for p in found]
+        if self.typer is not None and found:
+            probs = self.classify(frame, [(p[1], p[2]) for p in found])
+            # the detector's own type vote, weighted down, breaks ties for the close-up classifier
+            gy = [min(int(p[2] * SCALE / STRIDE), heat.shape[1] - 1) for p in found]
+            gx = [min(int(p[1] * SCALE / STRIDE), heat.shape[2] - 1) for p in found]
+            probs = probs * (cls[:, gy, gx].T ** 0.3)
+            kinds = probs.argmax(1).tolist()
         units = []
-        for side, u, v, score, k, p in self.peaks(heat, cls, off):
+        for (side, u, v, score, _, _), k in zip(found, kinds):
             tx, ty = frame_to_tile(u, v)
-            if not (-0.5 <= tx <= 18.5 and -0.5 <= ty <= 32.5):
-                continue
             units.append(SeenUnit(owner=side, x=float(np.clip(tx, 0, 18)), y=float(np.clip(ty - self.ground, 0, 32)),
                                   size=1, char=self.classes[k], score=score))
         return units

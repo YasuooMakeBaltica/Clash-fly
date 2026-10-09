@@ -29,7 +29,8 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
-from flybrain.real.troops import CLASSES, FRAME_SIZE, INPUT_SIZE, SCALE, STRIDE, TroopNet, frame_to_tile, kata_class  # noqa: E402
+from flybrain.real.troops import (CLASSES, FRAME_SIZE, INPUT_SIZE, SCALE, STRIDE, TroopNet, frame_to_tile,  # noqa: E402
+                                  kata_class, net_input)
 
 NOT_TROOPS = {
     "king-tower", "queen-tower", "cannoneer-tower", "dagger-duchess-tower", "dagger-duchess-tower-bar", "tower-bar",
@@ -81,9 +82,7 @@ def build_cache(files, path):
         return np.memmap(path, np.uint8, "r", shape=shape)
     mm = np.memmap(path + ".tmp", np.uint8, "w+", shape=shape)
     for i, f in enumerate(files):
-        img = cv2.imread(f)
-        img = cv2.resize(img, (int(FRAME_SIZE[0] * SCALE), int(FRAME_SIZE[1] * SCALE)), interpolation=cv2.INTER_AREA)
-        mm[i, :img.shape[0], :img.shape[1]] = img
+        mm[i] = net_input(cv2.imread(f))
         if i % 1000 == 0:
             print(f"  cached {i}/{len(files)}", flush=True)
     mm.flush()

@@ -2,10 +2,15 @@
 
 Reward is delivered by driving reward (PAM) or punishment (PPL1) dopamine
 neurons; their simulated firing rates gate the KC->MBON plasticity.
+
+An agent can have several action heads (e.g. which card, and which lane).
+Each head gets its own share of the MBONs, split into one group per option;
+every head votes independently from the same Kenyon cell code.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -37,19 +42,24 @@ class AgentConfig:
 
 
 class FlyAgent:
-    def __init__(self, conn: Connectome, n_channels: int, n_actions: int = 2,
+    def __init__(self, conn: Connectome, n_channels: int, n_actions: int | Sequence[int] = 2,
                  net_cfg: NetworkConfig | None = None, plast_cfg: PlasticityConfig | None = None,
-                 cfg: AgentConfig | None = None, device: str = "cpu"):
+                 cfg: AgentConfig | None = None, device: str = "cpu",
+                 probe: np.ndarray | None = None):
+        """``n_actions``: options per head, e.g. 2, or (9, 2) for card x lane.
+        ``probe``: example feature vectors to calibrate firing rates on
+        (random sparse patterns if omitted)."""
         self.cfg = cfg or AgentConfig()
         self.rng = np.random.default_rng(self.cfg.seed)
         torch.manual_seed(self.cfg.seed)
         self.device = torch.device(device)
         self.net = MushroomBody(conn, net_cfg, device=device)
-        self.n_channels, self.n_actions = n_channels, n_actions
+        self.n_channels = n_channels
+        self.heads = [int(n_actions)] if np.isscalar(n_actions) else [int(n) for n in n_actions]
         nrn = conn.neurons
 
         self.channel_pn = self._assign_channels(nrn, n_channels)   # (C, N)
-        self.groups = self._assign_groups(nrn, n_actions)           # (A, n_mbon)
+        self.groups = self._assign_groups(nrn, self.heads)          # per head: (options, n_mbon)
         dan = (nrn["pop"] == "DAN").to_numpy()
         self.reward_dans = torch.tensor(dan & (nrn["valence"] == "reward").to_numpy(), device=self.device)
         self.punish_dans = torch.tensor(dan & (nrn["valence"] == "punish").to_numpy(), device=self.device)
@@ -59,7 +69,7 @@ class FlyAgent:
         self.expected_reward = 0.0
         self.calibration = None
         if self.cfg.calibrate:
-            self.calibration = self.calibrate()
+            self.calibration = self.calibrate(probe)
         self.rule = ThreeFactorRule(self.net.W_kc_mbon_init, self.net.mask_kc_mbon, plast_cfg)
 
     # ---------------------------------------------------------------- wiring
@@ -82,31 +92,49 @@ class FlyAgent:
             m[channel_of_type[t], idx] = 1
         return m
 
-    def _assign_groups(self, nrn, n_actions: int) -> torch.Tensor:
-        """Split MBONs into one voting group per action."""
+    def _assign_groups(self, nrn, heads: list[int]) -> list[torch.Tensor]:
+        """Split MBONs into one voting group per option of each head.
+
+        With a single two-option head and ``action_groups="side"``, left
+        hemisphere MBONs vote for option 0 and right ones for option 1.
+        Otherwise MBONs are shared out at random, in proportion to each
+        head's number of options.
+        """
         mb = nrn.iloc[self.net.mbon]
-        g = torch.zeros(n_actions, len(mb), device=self.device)
-        if self.cfg.action_groups == "side" and n_actions == 2:
+        n = len(mb)
+        if self.cfg.action_groups not in ("side", "random"):
+            raise ValueError(f"unknown action_groups {self.cfg.action_groups!r}")
+        if n < sum(heads):
+            raise ValueError(f"{n} MBONs is too few for {sum(heads)} action options")
+        if self.cfg.action_groups == "side" and heads == [2]:
             side = mb["side"].to_numpy()
+            g = torch.zeros(2, n, device=self.device)
             g[0, torch.tensor(side == "left")] = 1
             g[1, torch.tensor(side == "right")] = 1
-        elif self.cfg.action_groups in ("side", "random"):
-            perm = self.rng.permutation(len(mb))
-            for a in range(n_actions):
-                g[a, torch.tensor(perm[a::n_actions])] = 1
-        else:
-            raise ValueError(f"unknown action_groups {self.cfg.action_groups!r}")
-        return g
+            return [g]
+        perm = self.rng.permutation(n)
+        share = np.floor(np.array(heads) / sum(heads) * n).astype(int)
+        share[np.argmax(heads)] += n - share.sum()
+        out, start = [], 0
+        for k, m in zip(heads, share):
+            g = torch.zeros(k, n, device=self.device)
+            idx = perm[start:start + m]
+            for a in range(k):
+                g[a, torch.tensor(idx[a::k])] = 1
+            out.append(g)
+            start += m
+        return out
 
     def encode(self, features: np.ndarray) -> torch.Tensor:
         f = torch.as_tensor(features, device=self.device, dtype=self.net.dtype)
         return self.cfg.pn_current * (f @ self.channel_pn).clamp(max=1)
 
-    def calibrate(self, n_probe: int = 16, verbose: bool = False) -> dict:
-        probe = np.zeros((n_probe, self.n_channels), dtype=np.float32)
-        k = max(1, self.n_channels // 8)  # a sparse random pattern per probe
-        for row in probe:
-            row[self.rng.choice(self.n_channels, size=k, replace=False)] = 1
+    def calibrate(self, probe: np.ndarray | None = None, n_probe: int = 16, verbose: bool = False) -> dict:
+        if probe is None:
+            probe = np.zeros((n_probe, self.n_channels), dtype=np.float32)
+            k = max(1, self.n_channels // 8)  # a sparse random pattern per probe
+            for row in probe:
+                row[self.rng.choice(self.n_channels, size=k, replace=False)] = 1
         return calibrate(self.net, self.encode(probe), self.cfg.decision_steps,
                          kc_active_frac=self.cfg.kc_active_frac,
                          mbon_rate_hz=self.cfg.mbon_rate_hz, verbose=verbose)
@@ -116,8 +144,14 @@ class FlyAgent:
         self.rule.reset(batch)
 
     @torch.no_grad()
-    def act(self, features: np.ndarray, learn: bool = True) -> np.ndarray:
-        """Run the network on the current state and return one action per game."""
+    def act(self, features: np.ndarray, mask: Sequence[np.ndarray] | None = None,
+            learn: bool = True) -> np.ndarray:
+        """Run the network on the current state and return actions.
+
+        ``mask``: per head, a (batch, options) boolean array of allowed
+        options (e.g. cards you can afford). Returns (batch,) for a single
+        head, else (batch, heads).
+        """
         i_ext = self.encode(features)
         b = i_ext.shape[0]
         self.net.reset(b)
@@ -126,18 +160,59 @@ class FlyAgent:
             noise = self.cfg.mbon_noise * torch.randn_like(i_ext) * self.mbon_noise_mask
             counts += self.net.step(i_ext + noise)
         kc, mbon = counts[:, self.net.kc], counts[:, self.net.mbon]
-        votes = (mbon @ self.groups.T) / self.groups.sum(1)          # mean count per group
-        votes = votes + 1e-3 * torch.rand_like(votes)                  # break ties randomly
-        action = votes.argmax(1).cpu().numpy()
-        explore = self.rng.random(b) < self.cfg.epsilon
-        action[explore] = self.rng.integers(0, self.n_actions, size=explore.sum())
-        self.last = dict(kc=kc, mbon=mbon, votes=votes)
+
+        masks = self._masks(mask, b)
+        actions = np.zeros((b, len(self.heads)), dtype=np.int64)
+        all_votes = []
+        for h, g in enumerate(self.groups):
+            votes = (mbon @ g.T) / g.sum(1)                       # mean spikes per group
+            votes = votes + 1e-3 * torch.rand_like(votes)         # break ties randomly
+            votes = votes.masked_fill(~masks[h], -1.0)
+            a = votes.argmax(1).cpu().numpy()
+            explore = self.rng.random(b) < self.cfg.epsilon
+            for i in np.flatnonzero(explore):
+                a[i] = self.rng.choice(np.flatnonzero(masks[h][i].cpu().numpy()))
+            actions[:, h] = a
+            all_votes.append(votes)
+        self.last = dict(kc=kc, mbon=mbon, votes=all_votes, masks=masks)
         if learn:
-            a = torch.as_tensor(action, device=self.device)
-            chosen = self.groups[a]
-            other = self.groups.sum(0, keepdim=True) - chosen
-            self.rule.tag(kc, mbon, chosen, other)
-        return action
+            self._tag(actions)
+        return actions[:, 0] if len(self.heads) == 1 else actions
+
+    def _masks(self, mask, b: int) -> list[torch.Tensor]:
+        if mask is None:
+            return [torch.ones(b, k, dtype=torch.bool, device=self.device) for k in self.heads]
+        return [torch.as_tensor(np.asarray(m), dtype=torch.bool, device=self.device) for m in mask]
+
+    def _tag(self, actions: np.ndarray, active: np.ndarray | None = None) -> None:
+        """Mark the chosen groups (and the allowed alternatives) in the eligibility trace.
+
+        ``active``: optional (batch, heads) boolean; heads marked False are
+        left out (e.g. the lane when the action is "wait").
+        """
+        actions = np.asarray(actions).reshape(len(actions), -1)
+        chosen = torch.zeros_like(self.last["mbon"])
+        other = torch.zeros_like(chosen)
+        for h, g in enumerate(self.groups):
+            on = 1.0 if active is None else torch.as_tensor(
+                np.asarray(active)[:, h], device=self.device, dtype=g.dtype)[:, None]
+            c = g[torch.as_tensor(actions[:, h], device=self.device)]
+            chosen += on * c
+            other += on * (self.last["masks"][h].to(g.dtype) @ g - c)
+        self.rule.tag(self.last["kc"], self.last["mbon"], chosen, other)
+
+    def teach(self, teacher_actions: np.ndarray, active: np.ndarray | None = None,
+              strength: float = 1.0) -> None:
+        """Learn to copy a teacher on the state from the last :meth:`act` call.
+
+        Like a fly pairing an odour with sugar: the teacher's choice is tagged
+        and immediately followed by reward dopamine. Clears eligibility traces.
+        """
+        b = len(teacher_actions)
+        self.rule.reset(b)
+        self._tag(teacher_actions, active)
+        da_r, da_p = self.dopamine(np.full(b, strength, dtype=np.float32))
+        self.rule.apply(self.net.W_kc_mbon, da_r, da_p)
 
     @torch.no_grad()
     def dopamine(self, reward: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
@@ -162,3 +237,25 @@ class FlyAgent:
             reward = surprise
         da_r, da_p = self.dopamine(reward)
         self.rule.apply(self.net.W_kc_mbon, da_r, da_p)
+
+    # ------------------------------------------------------------ save/load
+    def state_dict(self) -> dict:
+        """Everything learned or calibrated (the wiring comes from the connectome)."""
+        return dict(
+            W_kc_mbon=self.net.W_kc_mbon.cpu(), W_kc_mbon_init=self.net.W_kc_mbon_init.cpu(),
+            fixed_values=self.net._val.cpu(), channel_pn=self.channel_pn.cpu(),
+            groups=[g.cpu() for g in self.groups], heads=self.heads,
+            expected_reward=self.expected_reward, calibration=self.calibration,
+        )
+
+    def load_state_dict(self, state: dict) -> None:
+        if list(state["heads"]) != self.heads:
+            raise ValueError(f"checkpoint heads {state['heads']} != agent heads {self.heads}")
+        self.net.W_kc_mbon.copy_(state["W_kc_mbon"].to(self.device))
+        self.net.W_kc_mbon_init.copy_(state["W_kc_mbon_init"].to(self.device))
+        self.net._val.copy_(state["fixed_values"])
+        self.net._build_sparse()
+        self.channel_pn = state["channel_pn"].to(self.device)
+        self.groups = [g.to(self.device) for g in state["groups"]]
+        self.expected_reward = state["expected_reward"]
+        self.calibration = state["calibration"]

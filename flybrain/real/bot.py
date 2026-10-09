@@ -5,13 +5,14 @@
     python -m flybrain.real.bot --adb ... --learn --save models/fly_live.pt         # keeps learning
 
 Once per second: screenshot -> read elixir, hand, towers, troops -> rebuild
-a simulator state -> the fly brain votes on card and lane (same inputs as in
-training) -> the lane placement helper picks the spot -> adb taps the card
-and the spot. Start a battle yourself (or leave the bot running between
+a full-game simulator state -> the fly brain votes on a card role and a lane
+(same inputs as in training) -> the card in hand with that role is chosen
+and placed by the same helpers as in the simulator -> adb taps the card and
+the spot. Start a battle yourself (or leave the bot running between
 battles); it waits while no battle is on screen.
 
-Your deck must be the deck the brain was trained with: Knight, Archers,
-Giant, Musketeer, Mini P.E.K.K.A, Goblins, Fireball, Arrows.
+Put the 8 cards of your in-game battle deck in decks/fly.txt (or pass
+--deck), and save a picture of each with ``calibrate templates``.
 
 Supercell's terms of service prohibit automation. Use an alt account.
 """
@@ -28,10 +29,10 @@ import cv2
 import numpy as np
 import torch
 
-from ..envs.clash.cards import DECK
-from ..envs.clash.env import masks
-from ..envs.clash.strategy import View, place
-from ..envs.clash.env import features
+from ..envs.royale.db import ROLES, load
+from ..envs.royale.decks import load_deck
+from ..envs.royale.env import features, pick_card, role_mask
+from ..envs.royale.strategy import View, place
 from .adb import Adb
 from .layout import Layout
 from .perception import Perception, in_battle
@@ -42,8 +43,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_brain(path: str, device: str = "cpu"):
+    """A full-card-pool brain from scripts/train_royale.py."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    from train_clash import make_agent
+    from train_royale import make_agent
 
     ckpt = torch.load(path, weights_only=False, map_location=device)
     args = argparse.Namespace(**ckpt["args"])
@@ -102,14 +104,19 @@ def tower_score(towers: dict) -> tuple[float, float, int, int]:
 class Bot:
     """One decision per call to :meth:`step`; ``adb`` does the tapping (None = dry run)."""
 
-    def __init__(self, agent, perception: Perception, layout: Layout, adb=None, learn: bool = False):
-        self.agent, self.per, self.lay, self.adb, self.learn = agent, perception, layout, adb, learn
+    def __init__(self, agent, perception: Perception, layout: Layout, deck: list[str], adb=None, learn: bool = False):
+        self.agent, self.per, self.lay, self.deck, self.adb, self.learn = agent, perception, layout, deck, adb, learn
+        self.db = load()
+        self.champion = next((n for n in deck if self.db.cards[n].champion), None)
         self.battle_start = None
         self.prev_score = None
         self.played = 0
+        self.champion_played_at = None
+        self.last_ability = -1e9
 
     def start_battle(self, now: float) -> None:
         self.battle_start, self.prev_score, self.played = now, None, 0
+        self.champion_played_at, self.last_ability = None, -1e9
         self.per.reset()
         self.agent.begin_episode(1)
 
@@ -121,12 +128,27 @@ class Bot:
         self.battle_start = None
         return c_me, c_foe, result
 
+    def _maybe_ability(self, view: View, now: float, w: int, h: int) -> bool:
+        """Tap the champion ability when our champion is probably alive and enemies are near our side."""
+        if self.champion is None or self.champion_played_at is None or self.adb is None:
+            return False
+        ab = self.db.characters[self.db.cards[self.champion].summons[0][0].name].ability
+        if ab is None or now - self.last_ability < ab.cooldown + 1 or now - self.champion_played_at > 60:
+            return False
+        if view.elixir < ab.cost + 1 or not any(view.threats(lane) for lane in (0, 1)):
+            return False
+        cx, cy = self.lay.ability_button.center()
+        self.adb.tap(int(cx * w), int(cy * h))
+        self.last_ability = now
+        return True
+
     def step(self, img: np.ndarray, now: float) -> dict:
         h, w = img.shape[:2]
         obs = self.per.read(img)
-        view = View(build_sim(obs, now - self.battle_start), 0)
-        card_mask, lane_mask = masks(view)
-        a = self.agent.act(features(view)[None], [card_mask[None], lane_mask[None]], learn=self.learn)[0]
+        sim = build_sim(obs, now - self.battle_start, self.deck, db=self.db)
+        view = View(sim, 0)
+        mask = role_mask(view)
+        a = self.agent.act(features(view)[None], [mask[None], np.ones((1, 2), bool)], learn=self.learn)[0]
         if self.learn:
             score = tower_score(obs.towers)
             if self.prev_score is not None:
@@ -135,18 +157,23 @@ class Bot:
                 if r:
                     self.agent.reward(np.array([np.clip(r, -1, 1)], np.float32))
             self.prev_score = score
-        out = dict(obs=obs, action="wait", card=None, lane=int(a[1]), slot_xy=None, target_xy=None)
+        out = dict(obs=obs, action="wait", card=None, role=None, lane=int(a[1]), slot_xy=None, target_xy=None)
         if a[0] > 0:
-            card = int(a[0]) - 1
-            name = DECK[card].name
-            if name in obs.hand:
+            role = ROLES[int(a[0]) - 1]
+            card = pick_card(view, role)
+            out["role"] = role
+            if card is not None and card in obs.hand:
                 x, y = place(view, card, int(a[1]))
-                cx, cy = self.lay.hand_slots[obs.hand.index(name)].center()
-                out.update(card=name, slot_xy=(int(cx * w), int(cy * h)), target_xy=self.lay.tile_to_px(x, y, w, h),
-                           action=f"{name} {'left' if a[1] == 0 else 'right'} -> tile ({x:.1f},{y:.1f})")
+                cx, cy = self.lay.hand_slots[obs.hand.index(card)].center()
+                out.update(card=card, slot_xy=(int(cx * w), int(cy * h)), target_xy=self.lay.tile_to_px(x, y, w, h),
+                           action=f"{card} ({role}) {'left' if a[1] == 0 else 'right'} -> tile ({x:.1f},{y:.1f})")
                 if self.adb is not None:
                     self.adb.play_card(out["slot_xy"], out["target_xy"])
                     self.played += 1
+                    if card == self.champion:
+                        self.champion_played_at = now
+        if out["card"] is None and self._maybe_ability(view, now, w, h):
+            out["action"] = "champion ability"
         return out
 
 
@@ -155,7 +182,8 @@ def main():
     ap.add_argument("--adb", default="adb", help="path to adb (LDPlayer ships one)")
     ap.add_argument("--serial", help="device serial from 'adb devices' (e.g. emulator-5554)")
     ap.add_argument("--connect", help="adb connect to this host:port first (e.g. 127.0.0.1:5555)")
-    ap.add_argument("--brain", default=str(ROOT / "models/fly_v2.pt"))
+    ap.add_argument("--brain", default=str(ROOT / "models/fly_royale.pt"))
+    ap.add_argument("--deck", default=str(ROOT / "decks/fly.txt"), help="your in-game battle deck (8 cards)")
     ap.add_argument("--layout", default="layout.json", help="from 'calibrate pick' (defaults are estimates)")
     ap.add_argument("--templates", default="templates/cards", help="card pictures from 'calibrate templates'")
     ap.add_argument("--dry-run", action="store_true", help="read the screen and decide, but never tap")
@@ -173,15 +201,17 @@ def main():
     if not Path(args.layout).exists():
         print(f"warning: {args.layout} not found, using estimated screen positions. Run calibrate first.")
     per = Perception(lay, args.templates)
-    if len(per.matcher.templates) < len(DECK):
-        missing = [c.name for c in DECK if c.name not in per.matcher.templates]
+    deck = load_deck(args.deck)
+    print("deck:", deck)
+    missing = [n for n in deck if n not in per.matcher.templates]
+    if missing:
         print(f"warning: no card pictures for {missing}; the bot can't see those cards. Run calibrate templates.")
     agent, brain_args = load_brain(args.brain)
     print(f"brain {args.brain}: decision {brain_args.get('decision_ms')} ms, {agent.net.kc.stop - agent.net.kc.start} KCs")
     debug = Path(args.debug_dir)
     debug.mkdir(parents=True, exist_ok=True)
 
-    bot = Bot(agent, per, lay, adb=None if args.dry_run else adb, learn=args.learn)
+    bot = Bot(agent, per, lay, deck, adb=None if args.dry_run else adb, learn=args.learn)
     last_seen, matches = 0.0, 0
     try:
         while True:

@@ -137,46 +137,70 @@ the replay viewer.
 
 ## Playing the real game (LDPlayer)
 
-`flybrain/real/` reads the LDPlayer screen and plays through adb:
+`flybrain/real/` reads the LDPlayer screen and plays through adb, with the
+full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
 
-1. **Screenshots and taps** via adb (`adb.py`). LDPlayer ships its own adb
-   (e.g. `C:\LDPlayer\LDPlayer9\adb.exe`); enable ADB in LDPlayer's
-   settings and set the resolution to 540×960 (portrait).
+1. **Screenshots and taps** via adb (`adb.py`).
 2. **Screen reading** (`perception.py`): elixir from the pink bar, your hand
-   by matching card pictures, tower HP from the HP bars (tracked over time,
-   destroyed towers detected), troops from their red/blue level badges.
-   Troop *types* are not recognised yet; that needs a trained detector.
-3. **Same inputs as in training** (`state.py`): what's on screen is turned
-   back into a simulator state, so the trained brain gets the exact 62
-   situation channels it learned on, and cards are placed with the same lane
-   helper.
-4. **Decision and tap** (`bot.py`) once per second: tap the card slot, then
-   the drop spot.
+   by matching card pictures you save once, tower HP from the HP bars
+   (tracked over time, destroyed towers detected), troops from their
+   red/blue level badges. Troop *types* are not recognised yet.
+3. **Same inputs as in training** (`state.py`): the screen is turned back
+   into a full-game simulator state, so the brain gets the 89 situation
+   channels it learned on; the card for its chosen role and the drop spot
+   come from the same helpers as in the simulator.
+4. **Decision and tap** (`bot.py`) once per second; champions' ability
+   button is tapped when enemies come at you.
 
-The deck must be the training deck: Knight, Archers, Giant, Musketeer,
-Mini P.E.K.K.A, Goblins, Fireball, Arrows. The trained brain is in
-`models/fly_v2.pt`.
+### Setup on Windows
 
-**Setup on your PC** (screen positions in the code are estimates until you
-calibrate):
+1. Install **Python 3.11+** from python.org (tick "Add python.exe to PATH")
+   and **Git** from git-scm.com.
+2. Get the code and install packages (in a terminal):
 
-```bash
-pip install -r requirements-real.txt
-set ADB="C:\LDPlayer\LDPlayer9\adb.exe"
-# in a battle:
-python -m flybrain.real.calibrate screenshot --adb %ADB% --out shot.png
-python -m flybrain.real.calibrate check --image shot.png      # look at shot_check.png
-python -m flybrain.real.calibrate pick --image shot.png       # drag boxes if they're off
-python -m flybrain.real.calibrate templates --image shot.png --cards "Knight,Archers,Giant,Musketeer" --next Goblins
-#   ...repeat templates with other screenshots until all 8 cards are saved
-python -m flybrain.real.bot --adb %ADB% --dry-run             # reads + decides, no taps
-python -m flybrain.real.bot --adb %ADB%                       # plays
-python -m flybrain.real.bot --adb %ADB% --learn               # keeps learning from tower damage
-```
+   ```bat
+   git clone -b claude/read-learn-twin-dyb48p https://github.com/YasuooMakeBaltica/Clash-fly
+   cd Clash-fly
+   pip install -r requirements-real.txt
+   ```
 
-The bot saves annotated screenshots to `runs/real/` every 5 s so you can see
-what it read. Supercell's terms of service prohibit automation: use an alt
-account.
+3. **LDPlayer settings**: Settings → Advanced → resolution **540×960**
+   (mobile/portrait). Settings → Other settings → **ADB debugging: open
+   local connection**. Restart LDPlayer. Finish the Clash Royale tutorial by
+   hand on your alt account.
+4. **Your deck**: put the 8 cards of your in-game battle deck in
+   `decks/fly.txt`, one per line (loose names like "pekka" or "log" work).
+5. **Calibrate** (start a Training Camp or friendly battle first):
+
+   ```bat
+   set ADB="C:\LDPlayer\LDPlayer9\adb.exe"
+   %ADB% devices
+   python -m flybrain.real.calibrate screenshot --adb %ADB% --out shot.png
+   python -m flybrain.real.calibrate check --image shot.png
+   ```
+
+   Open `shot_check.png`. If the boxes don't sit on the arena, elixir bar,
+   cards and tower HP bars, run `python -m flybrain.real.calibrate pick
+   --image shot.png` and drag them. Then save a picture of each card:
+
+   ```bat
+   python -m flybrain.real.calibrate templates --image shot.png --cards "Hog Rider,Musketeer,Cannon,Ice Golem" --next "Skeletons"
+   ```
+
+   (the 4 hand cards left to right, then the small next card). Take more
+   screenshots and repeat until all 8 deck cards are saved.
+6. **Run**:
+
+   ```bat
+   python -m flybrain.real.bot --adb %ADB% --dry-run     REM reads + decides, no taps
+   python -m flybrain.real.bot --adb %ADB%               REM plays
+   python -m flybrain.real.bot --adb %ADB% --learn       REM keeps learning from tower damage
+   ```
+
+   Start battles yourself; the bot waits between them. It saves annotated
+   screenshots to `runs/real/` every 5 s so you can see what it read.
+
+Supercell's terms of service prohibit automation: use an alt account.
 
 ## Layout
 

@@ -18,7 +18,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ..envs.clash.cards import HEIGHT, LANE_X, WIDTH
+from ..envs.royale.sim import HEIGHT, LANE_X, WIDTH
 
 
 @dataclass
@@ -51,6 +51,7 @@ class Layout:
     elixir_bar: Box = field(default_factory=lambda: Box(0.28, 0.955, 0.98, 0.985))
     hand_slots: list[Box] = field(default_factory=_slots)
     next_slot: Box = field(default_factory=lambda: Box(0.04, 0.885, 0.17, 0.965))
+    ability_button: Box = field(default_factory=lambda: Box(0.80, 0.745, 0.96, 0.81))  # champion ability (estimate)
     # Tower HP bars, as boxes in tile coordinates (x0, y_top, x1, y_bottom).
     # Princess bars sit just above each tower; the king's above the king.
     princess_bar_tiles: tuple[float, float, float, float] = (-1.7, 2.4, 1.7, 1.8)
@@ -103,7 +104,7 @@ class Layout:
         d = json.loads(Path(path).read_text())
         lay = cls()
         for k, v in d.items():
-            if k in ("arena", "elixir_bar", "next_slot"):
+            if k in ("arena", "elixir_bar", "next_slot", "ability_button"):
                 setattr(lay, k, Box(**v))
             elif k == "hand_slots":
                 lay.hand_slots = [Box(**b) for b in v]

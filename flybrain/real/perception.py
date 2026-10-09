@@ -19,10 +19,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ..envs.clash.cards import DECK
+from ..envs.royale.db import load
 from .layout import Box, Layout
-
-CARD_NAMES = [c.name for c in DECK]
 
 
 def _mask(hsv: np.ndarray, rng) -> np.ndarray:
@@ -70,10 +68,10 @@ class CardMatcher:
         self.threshold = threshold
         self.templates: dict[str, np.ndarray] = {}
         d = Path(template_dir)
-        for name in CARD_NAMES:
-            p = d / f"{name}.png"
-            if p.exists():
-                self.templates[name] = self._prep(cv2.imread(str(p)))
+        cards = load().cards
+        for p in sorted(d.glob("*.png")) if d.exists() else []:
+            if p.stem in cards:
+                self.templates[p.stem] = self._prep(cv2.imread(str(p)))
 
     def _prep(self, crop: np.ndarray) -> np.ndarray:
         g = cv2.cvtColor(cv2.resize(crop, self.size, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)

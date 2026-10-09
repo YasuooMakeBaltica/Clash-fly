@@ -8,7 +8,7 @@
        python -m flybrain.real.calibrate pick --image shot.png
 4. Save card pictures: name the 4 cards in your hand, left to right (and the next card):
        python -m flybrain.real.calibrate templates --image shot.png --cards "Knight,Archers,Giant,Musketeer" --next Goblins
-   Repeat with other screenshots until all 8 cards have a picture in templates/cards/.
+   Repeat with other screenshots until every card in your deck has a picture in templates/cards/.
 """
 
 from __future__ import annotations
@@ -18,7 +18,8 @@ from pathlib import Path
 
 import cv2
 
-from ..envs.clash.cards import CARD_INDEX, LANE_X, WIDTH
+from ..envs.royale.decks import resolve
+from ..envs.royale.sim import LANE_X, WIDTH
 from .adb import Adb
 from .bot import draw_overlay
 from .layout import Box, Layout
@@ -76,6 +77,9 @@ def cmd_pick(a):
     b = _roi(img, "the small 'next card' picture")
     if b:
         lay.next_slot = b
+    b = _roi(img, "the champion ability button (only if a champion is on the field; c to skip)")
+    if b:
+        lay.ability_button = b
     # Tower HP bars, stored relative to the tower's tile position.
     b = _roi(img, "the ENEMY LEFT princess tower HP bar")
     if b:
@@ -96,19 +100,17 @@ def cmd_templates(a):
     lay = Layout.load(a.layout)
     d = Path(a.templates)
     d.mkdir(parents=True, exist_ok=True)
-    names = [n.strip() for n in a.cards.split(",")]
+    names = [resolve(n.strip()) for n in a.cards.split(",")]
     if len(names) != 4:
         raise SystemExit("--cards needs exactly 4 names, left to right")
     pairs = list(zip(names, lay.hand_slots))
     if a.next:
-        pairs.append((a.next.strip(), lay.next_slot))
+        pairs.append((resolve(a.next.strip()), lay.next_slot))
     for name, box in pairs:
-        if name not in CARD_INDEX:
-            raise SystemExit(f"unknown card {name!r}; use one of {list(CARD_INDEX)}")
         cv2.imwrite(str(d / f"{name}.png"), box.crop(img))
         print(f"saved {d / (name + '.png')}")
     have = sorted(p.stem for p in d.glob("*.png"))
-    print(f"card pictures so far: {have} ({len(have)}/8)")
+    print(f"card pictures so far: {have}")
 
 
 def main():

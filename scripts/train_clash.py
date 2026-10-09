@@ -43,7 +43,7 @@ def make_agent(args, probe=None):
     return FlyAgent(
         conn, N_CHANNELS, HEADS, device=args.device, probe=probe,
         plast_cfg=PlasticityConfig(mode=args.mode, lr=args.lr, recovery=args.recovery,
-                                   trace_decay=args.trace_decay),
+                                   trace_decay=args.trace_decay, scaling=getattr(args, "scaling", False)),
         cfg=AgentConfig(action_groups="random", seed=args.seed, decision_steps=args.decision_ms,
                         epsilon=args.epsilon, rpe_rate=args.rpe_rate,
                         mbon_rate_hz=getattr(args, "mbon_rate", 20.0)),
@@ -159,12 +159,14 @@ def main():
     ap.add_argument("--promote-at", type=float, default=0.6, help="win rate needed to face the next bot")
     ap.add_argument("--promote-window", type=int, default=32)
     ap.add_argument("--mode", default="depression", choices=["depression", "bidirectional"])
-    ap.add_argument("--lr", type=float, default=0.02)
-    ap.add_argument("--recovery", type=float, default=0.01)
+    ap.add_argument("--lr", type=float, default=0.2)
+    ap.add_argument("--recovery", type=float, default=0.0)
+    ap.add_argument("--no-scaling", dest="scaling", action="store_false",
+                    help="turn off synaptic scaling of MBON inputs (on by default)")
     ap.add_argument("--trace-decay", type=float, default=0.7)
     ap.add_argument("--rpe-rate", type=float, default=0.0)
-    ap.add_argument("--decision-ms", type=int, default=40)
-    ap.add_argument("--mbon-rate", type=float, default=20.0, help="calibration target MBON rate (Hz)")
+    ap.add_argument("--decision-ms", type=int, default=100, help="simulated ms per decision (longer = less vote noise)")
+    ap.add_argument("--mbon-rate", type=float, default=40.0, help="calibration target MBON rate (Hz)")
     ap.add_argument("--epsilon", type=float, default=0.03)
     ap.add_argument("--eval-every", type=int, default=5, help="rounds between evaluations")
     ap.add_argument("--eval-matches", type=int, default=32)

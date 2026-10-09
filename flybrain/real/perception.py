@@ -8,9 +8,9 @@
 * towers: share of each HP bar that is filled with the owner's colour
   (blue = you, red = enemy), tracked over time so a bar that disappears
   after being nearly empty counts as destroyed.
-* troops: red/blue level badges and health bars in the arena, grouped into
-  units. Troop types are unknown with this detector; a trained detector
-  (e.g. YOLO) can replace :class:`BadgeDetector` later.
+* troops: the trained troop detector (troops.py, models/troops.pt) finds
+  each troop, its side and its type. Without it, :class:`BadgeDetector`
+  looks for red/blue level badges and health bars (positions only).
 """
 
 from __future__ import annotations
@@ -51,6 +51,14 @@ def read_elixir(img: np.ndarray, lay: Layout) -> float:
     # The bar fills from the left; use the rightmost filled column.
     filled = (np.flatnonzero(cols)[-1] + 1) / len(cols)
     return float(np.clip(round(filled * 10, 1), 0, 10))
+
+
+def default_detector(weights: str | Path | None = None):
+    """The trained troop detector if its weights exist, else the colour-badge detector."""
+    from .troops import TroopDetector
+
+    path = Path(weights) if weights else Path(__file__).resolve().parents[2] / "models/troops.pt"
+    return TroopDetector(path) if path.exists() else BadgeDetector()
 
 
 def in_battle(img: np.ndarray, lay: Layout) -> bool:
@@ -171,6 +179,8 @@ class SeenUnit:
     y: float
     size: int      # number of badges/bars merged (≈ how many bodies)
     card: str | None = None
+    char: str | None = None    # simulator character when a troop classifier knows the type (troops.py)
+    score: float = 1.0
 
 
 class BadgeDetector:
@@ -190,7 +200,9 @@ class BadgeDetector:
             out.append(lay.tile_box(WIDTH / 2 - 2.4, ty + 4.2, WIDTH / 2 + 2.4, ty - 2.4))
         return out
 
-    def detect(self, img: np.ndarray, lay: Layout) -> list[SeenUnit]:
+    def detect(self, img: np.ndarray, lay: Layout, extra_ignore: list[tuple[int, int, int, int]] | None = None
+               ) -> list[SeenUnit]:
+        """``extra_ignore``: more pixel boxes (x0, y0, x1, y1) to skip, e.g. labelled towers in test frames."""
         h, w = img.shape[:2]
         x0, y0, x1, y1 = lay.arena.px(w, h)
         hsv = cv2.cvtColor(img[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
@@ -206,6 +218,8 @@ class BadgeDetector:
             ignore[max(0, by0 - y0):max(0, by1 - y0), max(0, bx0 - x0):max(0, bx1 - x0)] = 1
         for box in self.tower_boxes(lay):
             bx0, by0, bx1, by1 = box.px(w, h)
+            ignore[max(0, by0 - y0):max(0, by1 - y0), max(0, bx0 - x0):max(0, bx1 - x0)] = 1
+        for bx0, by0, bx1, by1 in extra_ignore or ():
             ignore[max(0, by0 - y0):max(0, by1 - y0), max(0, bx0 - x0):max(0, bx1 - x0)] = 1
         units: list[SeenUnit] = []
         for owner, m in ((0, blue_mask(hsv, lay)), (1, red_mask(hsv, lay))):

@@ -77,7 +77,7 @@ def record_on_policy(agent, args, fly_deck, matches, seed, follow_coach=0.0):
     for r in range(max(1, matches // args.batch)):
         opp = ("basic", "random", "coach")[r % 3]
         env = RoyaleEnv(args.batch, OPPONENTS[opp], fly_deck=fly_deck, fly_deck_share=args.fly_deck_share,
-                        seed=seed * 1000 + r, heads=agent.heads)
+                        seed=seed * 1000 + r, heads=agent.heads, guard=getattr(args, "dagger_guard", False))
         f, done = env.reset(), False
         while not done:
             m = env.masks()
@@ -159,6 +159,8 @@ def main():
     ap.add_argument("--init", help="start from this trained brain instead of a fresh one")
     ap.add_argument("--dagger-rounds", type=int, default=0, help="rounds of learning from the brain's own games")
     ap.add_argument("--dagger-matches", type=int, default=64, help="matches recorded per DAgger round")
+    ap.add_argument("--dagger-guard", action="store_true",
+                    help="the brain plays its DAgger games with the coach guard on, like the real bot")
     ap.add_argument("--split", action="store_true", help="separate play?/role/lane heads (see env.SPLIT_HEADS)")
     ap.add_argument("--wait-keep", type=float, default=1.0, help="share of coach 'wait' decisions taught (balances plays)")
     ap.add_argument("--n-kc", type=int, default=2500)

@@ -41,7 +41,7 @@ from ..envs.royale.strategy import Coach, View, place
 from .adb import Adb
 from .cards import OFFICIAL_DIR, DeckTracker, download_official, fill_deck
 from .layout import Layout
-from .perception import Perception, in_battle
+from .perception import BadgeDetector, Perception, default_detector, in_battle
 from .state import build_sim
 from ..deck_editor import write_deck
 
@@ -89,10 +89,22 @@ def draw_overlay(img: np.ndarray, lay: Layout, obs=None, note: str = "") -> np.n
         for u in obs.units:
             cx, cy = lay.tile_to_px(u.x, u.y, w, h)
             cv2.circle(out, (cx, cy), 9, (255, 128, 0) if u.owner == 0 else (0, 0, 255), 2)
-            cv2.putText(out, str(u.size), (cx + 8, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            cv2.putText(out, u.char or str(u.size), (cx + 8, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     if note:
         cv2.putText(out, note, (6, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     return out
+
+
+def troop_summary(units, owner: int) -> str:
+    """e.g. 'HogRider, Skeleton x3' (or just a count when types are unknown)."""
+    from collections import Counter
+
+    seen = [u for u in units if u.owner == owner]
+    if not seen:
+        return "-"
+    if all(u.char is None for u in seen):
+        return str(sum(u.size for u in seen))
+    return ", ".join(f"{n} x{k}" if k > 1 else n for n, k in Counter(u.char or "?" for u in seen).most_common())
 
 
 def tower_score(towers: dict) -> tuple[float, float, int, int]:
@@ -237,6 +249,7 @@ def main():
     ap.add_argument("--layout", default="layout.json", help="from 'calibrate pick' (defaults are estimates)")
     ap.add_argument("--templates", default="templates/cards", help="card pictures from 'calibrate templates' (optional)")
     ap.add_argument("--official", default=str(OFFICIAL_DIR), help="official card art (downloaded on first run)")
+    ap.add_argument("--troops", default=str(ROOT / "models/troops.pt"), help="trained troop detector weights")
     ap.add_argument("--no-guard", action="store_true", help="pure fly brain: no coach rules on top of its moves")
     ap.add_argument("--no-auto-deck", action="store_true", help="don't learn the deck from the hand; use --deck only")
     ap.add_argument("--dry-run", action="store_true", help="read the screen and decide, but never tap")
@@ -258,7 +271,10 @@ def main():
         failed = download_official(args.official)
         if failed:
             print(f"warning: couldn't download {len(failed)} card pictures ({failed[:5]}...); check your internet")
-    per = Perception(lay, args.templates, official_dir=args.official)
+    detector = default_detector(args.troops)
+    per = Perception(lay, args.templates, official_dir=args.official, detector=detector)
+    print("troops:", "trained detector (types known)" if not isinstance(detector, BadgeDetector)
+          else "colour badges only (types unknown; models/troops.pt not found)")
     deck = load_deck(args.deck)
     deck_mtime = Path(args.deck).stat().st_mtime
     print("deck:", deck, "" if args.no_auto_deck else "(updates itself from what's in your hand)")
@@ -314,9 +330,8 @@ def main():
             last_seen = t0
             out = bot.step(img, t0)
             obs, mt = out["obs"], t0 - bot.battle_start
-            print(f"[{mt:5.1f}s] elixir {obs.elixir:4.1f} hand {obs.hand} units "
-                  f"{sum(u.owner == 1 for u in obs.units)} enemy / {sum(u.owner == 0 for u in obs.units)} mine "
-                  f"-> {out['action']}", flush=True)
+            print(f"[{mt:5.1f}s] elixir {obs.elixir:4.1f} hand {obs.hand} enemy {troop_summary(obs.units, 1)} "
+                  f"mine {troop_summary(obs.units, 0)} -> {out['action']}", flush=True)
             if int(mt) % 5 == 0:
                 cv2.imwrite(str(debug / f"frame_{int(mt):03d}.png"), draw_overlay(img, lay, obs, out["action"]))
             time.sleep(max(0.0, args.every - (time.time() - t0)))

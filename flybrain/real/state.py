@@ -6,10 +6,11 @@ reuse the same features, role masks, card picks and placement. You are
 player 0 (bottom). The opponent's deck and elixir are unknown: they get a
 placeholder deck and a middling elixir estimate.
 
-Troop types are unknown with the badge detector, so seen troops become a
+With the troop detector (troops.py) every seen troop has its real type, so
+the game state knows air from ground, tanks, building targeters and so on.
+With the colour-badge fallback types are unknown, so seen troops become a
 generic ground troop (or a group of small ones when several badges are
-close together). Threat size and lane are right; threat type (air, tank ...)
-needs a troop classifier.
+close together): lane and size are right, type is not.
 """
 
 from __future__ import annotations
@@ -48,7 +49,9 @@ def build_sim(obs: Observation, match_time: float, deck: list[str], elixir_margi
             t.active = frac < 1.0
     generic, small = db.characters["Knight"], db.characters["Goblin"]
     for u in obs.units:
-        if u.card in db.cards and db.cards[u.card].summons:
+        if u.char in db.characters:
+            spec, card, n = db.characters[u.char], None, 1
+        elif u.card in db.cards and db.cards[u.card].summons:
             spec, card, n = db.cards[u.card].summons[0][0], u.card, 1
         elif u.size >= 3:
             spec, card, n = small, None, u.size

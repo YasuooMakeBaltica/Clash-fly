@@ -24,7 +24,7 @@ from .adb import Adb
 from .bot import draw_overlay
 from .cards import OFFICIAL_DIR, download_official
 from .layout import Box, Layout
-from .perception import Perception
+from .perception import Perception, default_detector
 
 
 def cmd_screenshot(a):
@@ -49,7 +49,7 @@ def cmd_check(a):
     if not any(OFFICIAL_DIR.glob("*.png")):
         print("downloading the official card pictures (once)...")
         download_official()
-    obs = Perception(lay, a.templates, official_dir=OFFICIAL_DIR).read(img)
+    obs = Perception(lay, a.templates, official_dir=OFFICIAL_DIR, detector=default_detector()).read(img)
     out = Path(a.image).with_name(Path(a.image).stem + "_check.png")
     cv2.imwrite(str(out), draw_overlay(img, lay, obs))
     print(f"elixir {obs.elixir}  hand {obs.hand}  next {obs.next_card}")

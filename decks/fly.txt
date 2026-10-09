@@ -1,0 +1,10 @@
+# The fly brain's deck. Edit freely: 8 cards, one per line (or comma-separated).
+# Loose names work ("pekka", "log", "e-wiz"). At most one champion.
+Hog Rider
+Musketeer
+Cannon
+Ice Golem
+Skeletons
+Ice Spirit
+Fireball
+The Log

@@ -78,7 +78,31 @@ population comes out empty or wrong, check the column values against
 `weights.pt`. Useful flags: `--device cuda`, `--batch 64` (parallel games),
 `--mode bidirectional`, `--encoding relative`, `--shaping 0.3`.
 
-## Clash Royale (simulated)
+## Full card pool (109 cards)
+
+`flybrain/envs/royale/` is the full game: every ladder card, built from
+RoyaleAPI's datamine of the game files (`scripts/build_card_db.py` converts
+it to `flybrain/envs/royale/data/cards.json` at tournament level 11).
+
+* **Simulator** (`sim.py`): air and ground units, collisions, bridges and
+  river jumps, splash, piercing and chain attacks, charge and dash, ramping
+  damage, shields, spawners, death damage/spawns, timed bombs, building
+  decay, freeze/stun/slow/rage/poison/heal/invisibility, area spells,
+  Tornado, Clone, Mirror, Graveyard, Lightning, rolling spells, spell
+  travel, tunnelling (Miner, Goblin Drill), Elixir Collector, champions and
+  their abilities, double/triple elixir, overtime and tiebreak. Not in:
+  card evolutions and event-only cards (no stats in the data).
+* **Roles** (`db.py`): every card has one role, e.g. win condition, tank
+  killer, splash air, small spell. The brain decides *which role* to play
+  and in *which lane*; a helper picks the card in hand with that role. What
+  it learns therefore carries over to any deck.
+* **Your deck**: edit `decks/fly.txt` (8 cards, loose names like "pekka",
+  "log" or "e-wiz" are fine). Training mixes your deck with random sensible
+  decks so the brain learns every card.
+* **Training**: `python scripts/train_royale.py` records the coach playing
+  with many decks, teaches its choices to the brain, then tests it.
+
+## Clash Royale (simulated, starter deck)
 
 Before touching the real game, the brain learns in a simplified simulator
 (`flybrain/envs/clash/`): the 18×32 arena with river and bridges, princess
@@ -163,8 +187,10 @@ flybrain/
   plasticity.py   three-factor dopamine rule with eligibility traces
   agent.py        state -> PN encoding, MBON-group voting, reward -> DANs
   envs/catch.py   batched catch-the-ball
-  envs/clash/     Clash Royale simulator, coach and bots, brain environment
+  envs/clash/     first simulator (starter deck only); used by the browser game
+  envs/royale/    full simulator: card database, roles, decks, coach, brain environment
   real/           real game: adb, screen reading, calibration, bot loop
+decks/fly.txt     the fly brain's deck (edit me)
 web/              browser game (Beat the Fly): JS port of the sim and brain
 models/           trained brains
 scripts/          milestone scripts

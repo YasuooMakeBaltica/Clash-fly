@@ -127,6 +127,9 @@ def main():
     ap.add_argument("--sprites", help="the dataset's images/segment folder (synthetic close-ups of every troop type)")
     ap.add_argument("--all", action="store_true", help="also train on the validation sessions (final model)")
     ap.add_argument("--init", help="continue from these weights")
+    ap.add_argument("--negatives", help="'not a troop' close-ups (scripts/mine_troop_negatives.py): adds a verifier class")
+    ap.add_argument("--val-negatives", help="'not a troop' close-ups from the validation sessions, for scoring")
+    ap.add_argument("--neg-share", type=float, default=0.25, help="share of each batch that is 'not a troop'")
     ap.add_argument("--warmup", type=float, default=0.1)
     ap.add_argument("--out", default=str(ROOT / "models/troop_types.pt"))
     args = ap.parse_args()
@@ -160,10 +163,20 @@ def main():
     weight = weight / weight[torch.from_numpy(counts > 0)].mean()
     props = properties()
 
-    net = TypeNet(len(CLASSES))
+    neg = np.load(args.negatives)["x"] if args.negatives else None
+    vneg = np.load(args.val_negatives)["x"] if args.val_negatives else None
+    K = len(CLASSES)
+    net = TypeNet(K + (neg is not None))
     if args.init:
-        net.load_state_dict({k: v.float() if v.is_floating_point() else v
-                             for k, v in torch.load(args.init, weights_only=False)["model"].items()})
+        state = {k: v.float() if v.is_floating_point() else v
+                 for k, v in torch.load(args.init, weights_only=False)["model"].items()}
+        if neg is not None and state["fc.weight"].shape[0] == K:     # add the "not a troop" output
+            state["fc.weight"] = torch.cat([state["fc.weight"], torch.zeros(1, state["fc.weight"].shape[1])])
+            state["fc.bias"] = torch.cat([state["fc.bias"], torch.zeros(1)])
+        net.load_state_dict(state)
+    if neg is not None:
+        weight = torch.cat([weight, torch.ones(1)])
+        print(f"{len(neg)} 'not a troop' close-ups for the verifier class", flush=True)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=5e-4)
     steps = args.epochs * math.ceil(len(tr_idx) / args.batch)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=args.warmup)
@@ -176,6 +189,10 @@ def main():
         for s in range(0, len(perm), args.batch):
             b = perm[s:s + args.batch]
             xr, yr = x[b], y[b]
+            if neg is not None:
+                nb = int(len(b) * args.neg_share / (1 - args.neg_share))
+                xr = np.concatenate([xr, neg[rng.integers(0, len(neg), nb)]])
+                yr = np.concatenate([yr, np.full(nb, K)])
             if sprites:
                 xs_, ys_ = synthetic(sprites, backgrounds, len(b), rng)
                 xr, yr = np.concatenate([xr, xs_]), np.concatenate([yr, ys_])
@@ -198,16 +215,27 @@ def main():
             c = (out - 64) // 2
             for s in range(0, len(va_idx), 256):
                 b = va_idx[s:s + 256]
-                preds.append(net(batch_tensor(x[b, c:c + 64, c:c + 64])).argmax(1).numpy())
-        p = np.concatenate(preds)
+                preds.append(net(batch_tensor(x[b, c:c + 64, c:c + 64])).numpy())
+        logits_all = np.concatenate(preds)
         t = y[va_idx]
+        p = logits_all[:, :K].argmax(1)
         acc = (p == t).mean()
         prop = (props[p] == props[t]).all(1).mean()
+        extra = ""
+        if neg is not None:
+            soft = torch.softmax(torch.from_numpy(logits_all), 1).numpy()
+            kept = (soft[:, K] < 0.5).mean()
+            extra = f", real troops kept {kept:.3f}"
+            if vneg is not None:
+                with torch.no_grad():
+                    vs = torch.softmax(net(batch_tensor(vneg[:, c:c + 64, c:c + 64])), 1).numpy()
+                extra += f", false alarms rejected {(vs[:, K] >= 0.5).mean():.3f}"
         print(f"epoch {ep + 1}: loss {tot / n:.3f}; validation type accuracy {acc:.3f}, coach properties right "
-              f"{prop:.3f} ({len(t)} troops) ({time.time() - t0:.0f}s)", flush=True)
+              f"{prop:.3f}{extra} ({len(t)} troops) ({time.time() - t0:.0f}s)", flush=True)
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         ckpt = dict(model={k: v.half() if v.is_floating_point() else v for k, v in net.state_dict().items()},
-                    classes=CLASSES, crop=TypeNet.CROP, val_acc=float(acc), val_props=float(prop), epoch=ep + 1)
+                    classes=CLASSES, crop=TypeNet.CROP, val_acc=float(acc), val_props=float(prop), epoch=ep + 1,
+                    none=neg is not None)
         torch.save(ckpt, str(args.out).replace(".pt", "_last.pt"))
         if acc > best:
             best = acc

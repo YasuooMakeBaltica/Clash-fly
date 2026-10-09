@@ -217,13 +217,15 @@ class TroopDetector:
         self.device = device
         self.ground = ckpt.get("ground", 0.0)       # extra shift (tiles) from the predicted point to the feet
         types = Path(types) if types else Path(weights).with_name("troop_types.pt")
-        self.typer = None
+        self.typer, self.has_none = None, False
         if types.exists():
             t = torch.load(types, map_location=device, weights_only=False)
             if list(t["classes"]) == list(self.classes):
-                self.typer = TypeNet(len(self.classes)).to(device).eval()
+                self.has_none = bool(t.get("none", False))       # extra last output: "not a troop"
+                self.typer = TypeNet(len(self.classes) + self.has_none).to(device).eval()
                 self.typer.load_state_dict(_floats(t["model"]))
                 self.type_crop = t.get("crop", TypeNet.CROP)
+                self.none_threshold = t.get("none_threshold", 0.5)
 
     @torch.no_grad()
     def raw(self, crop: np.ndarray):
@@ -259,11 +261,16 @@ class TroopDetector:
         kinds = [p[4] for p in found]
         if self.typer is not None and found:
             probs = self.classify(frame, [(p[1], p[2]) for p in found])
-            # the detector's own type vote, weighted down, breaks ties for the close-up classifier
-            gy = [min(int(p[2] * SCALE / STRIDE), heat.shape[1] - 1) for p in found]
-            gx = [min(int(p[1] * SCALE / STRIDE), heat.shape[2] - 1) for p in found]
-            probs = probs * (cls[:, gy, gx].T ** 0.3)
-            kinds = probs.argmax(1).tolist()
+            if self.has_none:            # the close-up says it isn't a troop: drop the detection
+                real = probs[:, -1] < self.none_threshold
+                found = [p for p, r in zip(found, real) if r]
+                probs = probs[real, :-1]
+            if found:
+                # the detector's own type vote, weighted down, breaks ties for the close-up classifier
+                gy = [min(int(p[2] * SCALE / STRIDE), heat.shape[1] - 1) for p in found]
+                gx = [min(int(p[1] * SCALE / STRIDE), heat.shape[2] - 1) for p in found]
+                probs = probs * (cls[:, gy, gx].T ** 0.3)
+            kinds = probs.argmax(1).tolist() if found else []
         units = []
         for (side, u, v, score, _, _), k in zip(found, kinds):
             tx, ty = frame_to_tile(u, v)

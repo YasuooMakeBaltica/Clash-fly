@@ -34,6 +34,10 @@ class PlasticityConfig:
     # "pre_action": trace = KC spikes x [MBON in chosen group]
     # "pre_post":   trace = KC spikes x MBON spikes (Hebbian tag)
     eligibility: str = "pre_action"
+    # Synaptic scaling: after each update, rescale every MBON's KC inputs so
+    # their total stays at its initial value. Keeps MBONs firing (and votes
+    # above spike noise) while preserving which synapses were weakened.
+    scaling: bool = False
 
 
 class ThreeFactorRule:
@@ -87,4 +91,7 @@ class ThreeFactorRule:
         w.add_(c.recovery * (self.w_init - w))
         w.copy_(torch.minimum(w.clamp_min(0), c.w_max * self.w_init))
         w.mul_(self.mask)
+        if c.scaling:
+            total = w.sum(1, keepdim=True)
+            w.mul_(self.w_init.sum(1, keepdim=True) / total.clamp_min(1e-12))
         return w

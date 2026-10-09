@@ -51,3 +51,11 @@ def test_weights_stay_bounded():
     assert w.max() <= 2.0
     rule.apply(w, torch.tensor([0.0]), torch.tensor([50.0]))
     assert w.min() >= 0.0
+
+
+def test_scaling_keeps_total_input_per_mbon():
+    rule, w = setup("depression", scaling=True)
+    before = w.sum(1).clone()
+    rule.apply(w, torch.tensor([1.0]), torch.tensor([0.0]))
+    assert torch.allclose(w.sum(1), before)
+    assert w[2, 0] < w[2, 1]  # the depressed synapse is still relatively weaker

@@ -26,6 +26,10 @@ class AgentConfig:
     mbon_noise: float = 0.05      # extra current noise on MBONs (exploration)
     epsilon: float = 0.05         # chance of a random action
     action_groups: str = "side"   # "side" (left/right hemisphere) or "random"
+    # Reward prediction error: dopamine reports reward minus a running average
+    # of past rewards (the fly gets this from MBON->DAN feedback). This is the
+    # averaging rate; 0 disables it and dopamine reports raw reward.
+    rpe_rate: float = 0.0
     calibrate: bool = True
     kc_active_frac: float = 0.1
     mbon_rate_hz: float = 20.0
@@ -52,6 +56,7 @@ class FlyAgent:
         self.mbon_noise_mask = torch.zeros(self.net.n, device=self.device)
         self.mbon_noise_mask[self.net.mbon] = 1
 
+        self.expected_reward = 0.0
         self.calibration = None
         if self.cfg.calibrate:
             self.calibration = self.calibrate()
@@ -151,5 +156,9 @@ class FlyAgent:
     def reward(self, reward: np.ndarray) -> None:
         if not np.any(reward):
             return
+        if self.cfg.rpe_rate:
+            surprise = reward - self.expected_reward
+            self.expected_reward += self.cfg.rpe_rate * float(np.mean(reward) - self.expected_reward)
+            reward = surprise
         da_r, da_p = self.dopamine(reward)
         self.rule.apply(self.net.W_kc_mbon, da_r, da_p)

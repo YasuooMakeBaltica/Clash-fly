@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--decision-ms", type=int, default=40, help="simulated ms per decision")
     ap.add_argument("--mbon-rate", type=float, default=20.0, help="calibration target MBON rate (Hz)")
     ap.add_argument("--epsilon", type=float, default=0.05)
+    ap.add_argument("--rpe-rate", type=float, default=0.0,
+                    help="dopamine = reward - running average (rate); 0 = raw reward")
     ap.add_argument("--eval-every", type=int, default=10, help="batches between evaluations")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="runs/catch")
@@ -69,7 +71,8 @@ def main():
         plast_cfg=PlasticityConfig(mode=args.mode, lr=args.lr, recovery=args.recovery,
                                    trace_decay=args.trace_decay, eligibility=args.eligibility),
         cfg=AgentConfig(action_groups=args.groups, seed=args.seed, decision_steps=args.decision_ms,
-                        mbon_rate_hz=args.mbon_rate, epsilon=args.epsilon),
+                        mbon_rate_hz=args.mbon_rate, epsilon=args.epsilon,
+                        rpe_rate=args.rpe_rate),
     )
     print("calibration:", agent.calibration)
 

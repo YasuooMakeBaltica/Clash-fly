@@ -254,7 +254,8 @@ COUNTER_ROLES = {
 
 COACH_DEFAULTS = dict(
     enough_defense=0.8,    # skip defending a lane when our defenders have this share of the attackers' hit points
-    hold_line=10.0,        # attackers closer than this (own-frame y) with no fitting card: save elixir instead
+    hold_line=7.0,         # attackers closer than this (own-frame y) with no fitting card: save elixir instead
+                           # (was 10; 7 won +5 points net over 1,600 head-to-head games)
     trade_margin=1.0,      # cast a spell when it hits this much more elixir than it costs
     push_hp=800.0,         # support a counter-push of at least this many hit points
     punish_below=2.5,      # opponent elixir at or below this: attack with the win condition

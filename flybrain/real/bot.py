@@ -115,6 +115,7 @@ class Bot:
         self.agent, self.per, self.lay, self.adb, self.learn = agent, perception, layout, adb, learn
         self.db = load()
         self.tracker = DeckTracker() if auto_deck else None
+        self.leak_at: float | None = 9.5
         self.set_deck(deck)
         self.battle_start = None
         self.prev_score = None
@@ -184,6 +185,8 @@ class Bot:
         sim = build_sim(obs, now - self.battle_start, deck, db=self.db)
         view = View(sim, 0)
         mask = role_mask(view)
+        if self.leak_at is not None and view.elixir >= self.leak_at and mask[1:].any():
+            mask[0] = False                      # full elixir: waiting would waste it, so the brain must pick a card
         a = self.agent.act(features(view)[None], [mask[None], np.ones((1, 2), bool)], learn=self.learn)[0]
         if self.learn:
             score = tower_score(obs.towers)

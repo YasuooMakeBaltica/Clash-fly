@@ -100,3 +100,29 @@ def test_bot_plays_a_match_through_fake_adb(perception):
             sim.step()
     assert len(adb.plays) >= 3                      # it plays cards
     assert all(ok for *_, ok in adb.plays)          # every tap was a card it could afford, in a legal spot
+
+
+class WaitingBrain:
+    """Always waits when allowed (the failure seen in a real match: never playing at full elixir)."""
+
+    def begin_episode(self, b):
+        pass
+
+    def act(self, f, masks, learn=False):
+        return np.array([[0 if masks[0][0, 0] else int(np.flatnonzero(masks[0][0])[0]), 0]])
+
+
+def test_bot_never_sits_on_full_elixir(perception):
+    from flybrain.real.bot import Bot
+    from flybrain.real.fake import FakeAdb
+
+    sim = Sim((DECK, random_deck(np.random.default_rng(6))), seed=2)
+    adb = FakeAdb(sim, perception.layout)
+    bot = Bot(WaitingBrain(), perception, perception.layout, DECK, adb=adb)
+    bot.start_battle(0.0)
+    while sim.time < 20 and not adb.plays:
+        bot.step(adb.screencap(), sim.time)
+        for _ in range(10):
+            sim.step()
+    assert adb.plays and adb.plays[0][3]                 # played (legally) once elixir was nearly full
+    assert sim.time >= 10                                # but waited while it wasn't

@@ -69,11 +69,15 @@ def record(args, fly_deck):
     return np.concatenate(X), np.concatenate(M), np.concatenate(A), np.concatenate(ACT)
 
 
-def save(agent, args, fly_deck):
-    """Checkpoint (after every epoch / DAgger round, so a cut-short run keeps its progress)."""
+def save(agent, args, fly_deck, tag: str | None = None):
+    """Checkpoint (after every epoch / DAgger round, so a cut-short run keeps its progress). With ``tag``
+    a copy is also kept as <out>_<tag>.pt, so a better middle round isn't lost to a worse last one."""
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     saved_args = {k: v for k, v in vars(args).items() if k != "device"}
-    torch.save(dict(agent=agent.state_dict(), args=saved_args, fly_deck=fly_deck), args.out)
+    ckpt = dict(agent=agent.state_dict(), args=saved_args, fly_deck=fly_deck)
+    torch.save(ckpt, args.out)
+    if tag:
+        torch.save(ckpt, str(args.out).replace(".pt", f"_{tag}.pt"))
 
 
 def record_on_policy(agent, args, fly_deck, matches, seed, follow_coach=0.0):
@@ -238,7 +242,7 @@ def main():
                         on_policy=agreement(agent, Xn, Mn, An)))
         print(f"   after round {k + 1}: coach-data agreement {log[-1]['agreement']}, "
               f"on its own games {log[-1]['on_policy']}  ({time.time() - t0:.0f}s)", flush=True)
-        save(agent, args, fly_deck)
+        save(agent, args, fly_deck, tag=f"round{k + 1}")
 
     save(agent, args, fly_deck)
     print(f"   saved {args.out}")

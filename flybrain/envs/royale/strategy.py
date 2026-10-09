@@ -267,6 +267,12 @@ class Coach:
         return True
 
     def suggest(self, view: View) -> tuple[str | None, int]:
+        card, lane, _ = self.plan(view)
+        return card, lane
+
+    def plan(self, view: View) -> tuple[str | None, int, str | None]:
+        """(card or None, lane, reason): reason is finish, defend, hold (threat but no fitting card),
+        trade, counterpush, punish, leak, or None."""
         db = view.db
         play = view.playable()
         roles = {n: db.cards[n].role for n in play}
@@ -279,7 +285,7 @@ class Coach:
                 for lane in (0, 1):
                     t = view.sim.tower(view.foe, "princess", lane)
                     if t.alive and t.hp <= dmg:
-                        return n, lane
+                        return n, lane, "finish"
 
         # 2. defend
         lanes = sorted((0, 1), key=lambda ln: -view.threat_hp(ln))
@@ -296,9 +302,9 @@ class Coach:
                 for role in COUNTER_ROLES[key]:
                     cands = [n for n in play if roles[n] == role and self.card_fit(view, n, prof)]
                     if cands:
-                        return min(cands, key=lambda n: db.cards[n].elixir), lane
+                        return min(cands, key=lambda n: db.cards[n].elixir), lane, "defend"
             if min(view.fy(u.y) for u in threats) < 10:
-                return None, lane
+                return None, lane, "hold"
 
         # 3. positive spell trades
         for n in play:
@@ -306,7 +312,7 @@ class Coach:
             if c.role in ("small_spell", "big_spell"):
                 for lane in (0, 1):
                     if spell_spot(view, n, lane)[0] >= c.elixir + 1.0:
-                        return n, lane
+                        return n, lane, "trade"
 
         # 4. counter-push: support survivors, boost a big push
         for lane in (0, 1):
@@ -316,31 +322,31 @@ class Coach:
                 if any(view.fy(u.y) > 20 for u in push) and push_hp >= 1500:
                     for n in play:
                         if n in ("Rage", "Freeze") and view.threats(lane) == []:
-                            return n, lane
+                            return n, lane, "counterpush"
                 for role in ("ranged", "splash_air", "splash_ground", "air", "swarm", "frontline", "champion"):
                     cands = [n for n in play if roles[n] == role]
                     if cands:
-                        return cands[0], lane
+                        return cands[0], lane, "counterpush"
 
         # 5. punish
         wins = [n for n in play if roles[n] == "win_condition"]
         back = view.enemy_back_tank()
         if wins and back is not None:
-            return wins[0], 1 - back
+            return wins[0], 1 - back, "punish"
         if wins and view.enemy_elixir() <= 2.5 and view.elixir >= db.cards[wins[0]].elixir:
-            return wins[0], view.weak_lane()
+            return wins[0], view.weak_lane(), "punish"
 
         # 6. don't leak elixir
         full = 9.0 if view.sim.elixir_multiplier == 1 else 6.5
         if view.elixir >= full:
             lane = view.weak_lane()
             if wins:
-                return wins[0], lane
+                return wins[0], lane, "leak"
             for role in ("spawner", "champion", "frontline", "tank_killer", "splash_ground", "ranged", "swarm", "cycle"):
                 cands = [n for n in play if roles[n] == role]
                 if cands:
-                    return cands[0], lane
-        return None, 0
+                    return cands[0], lane, "leak"
+        return None, 0, None
 
     def decide(self, sim: Sim, player: int) -> Move | None:
         view = View(sim, player)

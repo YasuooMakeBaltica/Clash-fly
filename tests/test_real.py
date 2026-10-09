@@ -108,6 +108,8 @@ class WaitingBrain:
     def begin_episode(self, b):
         pass
 
+    heads = (16, 2)
+
     def act(self, f, masks, learn=False):
         return np.array([[0 if masks[0][0, 0] else int(np.flatnonzero(masks[0][0])[0]), 0]])
 

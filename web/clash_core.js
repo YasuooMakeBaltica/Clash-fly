@@ -301,6 +301,7 @@ const ClashCore = (() => {
       this.chan_ptr = d.chan_ptr; this.chan_pn = d.chan_pn;
       this.card_group = d.card_group; this.lane_group = d.lane_group;   // per MBON, -1 if none
       this.card_n = d.card_n; this.lane_n = d.lane_n;                   // MBONs per group
+      this.play_group = d.play_group || null;                          // split brains: separate play?/wait vote
       this.v = new Float32Array(this.n); this.isyn = new Float32Array(this.n);
       this.iext = new Float32Array(this.n); this.refr = new Int16Array(this.n);
       this.spk = new Uint8Array(this.n); this.counts = new Float32Array(this.n);
@@ -331,13 +332,16 @@ const ClashCore = (() => {
         }
       }
       const cardVotes = new Array(d.card_n.length).fill(0), laneVotes = new Array(d.lane_n.length).fill(0);
+      const playVotes = this.play_group ? new Array(d.play_n.length).fill(0) : null;
       for (let m = 0; m < d.n_mbon; m++) {
         const c = this.counts[this.mb0 + m];
         if (this.card_group[m] >= 0) cardVotes[this.card_group[m]] += c;
         if (this.lane_group[m] >= 0) laneVotes[this.lane_group[m]] += c;
+        if (playVotes && this.play_group[m] >= 0) playVotes[this.play_group[m]] += c;
       }
       for (let g = 0; g < cardVotes.length; g++) cardVotes[g] /= d.card_n[g];
       for (let g = 0; g < laneVotes.length; g++) laneVotes[g] /= d.lane_n[g];
+      if (playVotes) for (let g = 0; g < playVotes.length; g++) playVotes[g] /= d.play_n[g];
       const pick = (votes, ok) => {
         const allowed = votes.map((_, i) => i).filter((i) => ok[i]);
         if (this.rng.random() < epsilon) return allowed[this.rng.int(allowed.length)];
@@ -347,7 +351,13 @@ const ClashCore = (() => {
       };
       let kcActive = 0;
       for (let i = this.kc0; i < this.mb0; i++) if (this.counts[i] > 0) kcActive++;
-      return { card: pick(cardVotes, mask), lane: pick(laneVotes, [true, true]), cardVotes, laneVotes, kcActive: kcActive / d.n_kc };
+      let card;
+      if (playVotes) {                        // split brain: first play or wait, then which role (0 = wait, i + 1 = role i)
+        const roles = mask.slice(1), any = roles.some(Boolean);
+        const play = pick(playVotes, [mask[0], any]);
+        card = play === 1 ? 1 + pick(cardVotes, any ? roles : roles.map(() => true)) : 0;
+      } else card = pick(cardVotes, mask);
+      return { card, lane: pick(laneVotes, [true, true]), cardVotes, laneVotes, playVotes, kcActive: kcActive / d.n_kc };
     }
   }
 

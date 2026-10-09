@@ -58,10 +58,14 @@ def export(agent) -> dict:
         g = g.cpu().numpy()
         return np.where(g.sum(0) > 0, g.argmax(0), -1).tolist(), g.sum(1).astype(int).tolist()
 
-    card_group, card_n = group_of(agent.groups[0])
-    lane_group, lane_n = group_of(agent.groups[1])
+    split = len(agent.groups) == 3            # play? / role / lane (env.SPLIT_HEADS)
+    card_group, card_n = group_of(agent.groups[1 if split else 0])
+    lane_group, lane_n = group_of(agent.groups[-1])
+    extra = {}
+    if split:
+        extra["play_group"], extra["play_n"] = group_of(agent.groups[0])
     cfg, ncfg = agent.cfg, net.cfg
-    return dict(
+    return dict(**extra,
         n_pn=int(n_pn), n_kc=int(n_kc), n_mbon=int(n_mb),
         alpha=net.alpha, beta=net.beta, refractory=ncfg.refractory, noise=ncfg.noise, apl_gain=ncfg.apl_gain,
         pn_current=cfg.pn_current, mbon_noise=cfg.mbon_noise, decision_steps=cfg.decision_steps,

@@ -30,7 +30,7 @@ import torch  # noqa: E402
 from flybrain.agent import AgentConfig, FlyAgent  # noqa: E402
 from flybrain.connectome import load  # noqa: E402
 from flybrain.envs.royale.decks import load_deck  # noqa: E402
-from flybrain.envs.royale.env import HEADS, N_CHANNELS, RoyaleEnv  # noqa: E402
+from flybrain.envs.royale.env import HEADS, N_CHANNELS, SPLIT_HEADS, RoyaleEnv, decode, encode  # noqa: E402
 from flybrain.envs.royale.strategy import BasicBot, Coach, RandomBot  # noqa: E402
 from flybrain.plasticity import PlasticityConfig  # noqa: E402
 
@@ -39,11 +39,12 @@ OPPONENTS = {"random": lambda s: RandomBot(s), "basic": lambda s: BasicBot(s), "
 
 def make_agent(args, probe=None):
     if args.data == "synthetic":
-        conn = load("synthetic", n_pn=680, n_kc=2500, n_mbon=args.n_mbon, n_dan=120, n_glomeruli=120)
+        conn = load("synthetic", n_pn=680, n_kc=getattr(args, "n_kc", 2500), n_mbon=args.n_mbon, n_dan=120, n_glomeruli=120)
     else:
         conn = load(args.data)
+    heads = SPLIT_HEADS if getattr(args, "split", False) else HEADS
     return FlyAgent(
-        conn, N_CHANNELS, HEADS, device=args.device, probe=probe,
+        conn, N_CHANNELS, heads, device=args.device, probe=probe,
         plast_cfg=PlasticityConfig(lr=args.lr, recovery=args.recovery, scaling=args.scaling),
         cfg=AgentConfig(action_groups="random", seed=args.seed, decision_steps=args.decision_ms,
                         mbon_rate_hz=args.mbon_rate, epsilon=0.0),
@@ -68,21 +69,33 @@ def record(args, fly_deck):
     return np.concatenate(X), np.concatenate(M), np.concatenate(A), np.concatenate(ACT)
 
 
+def brain_masks_batch(agent, M):
+    """Recorded role masks (wait + 15 roles) -> masks in the agent's head layout."""
+    n = len(M)
+    if tuple(agent.heads) == SPLIT_HEADS:
+        roles = M[:, 1:]
+        return [np.stack([M[:, 0], roles.any(1)], 1), np.where(roles.any(1)[:, None], roles, True),
+                np.ones((n, 2), bool)]
+    return [M, np.ones((n, 2), bool)]
+
+
 def agreement(agent, X, M, A, n=2000):
+    """How often the brain does what the coach did: waits when it waited, and the same role / lane when it played."""
     idx = np.arange(min(n, len(X)))
     out = []
     for s in range(0, len(idx), 250):
         b = idx[s:s + 250]
-        out.append(agent.act(X[b], [M[b], np.ones((len(b), 2), bool)], learn=False))
-    a = np.concatenate(out)
+        out.append(agent.act(X[b], brain_masks_batch(agent, M[b]), learn=False))
+    a = np.array([decode(x, agent.heads) for x in np.concatenate(out)])
     t = A[idx]
     plays = t[:, 0] > 0
-    return dict(wait=float((a[~plays, 0] == 0).mean()), role=float((a[plays, 0] == t[plays, 0]).mean()),
-                lane=float((a[plays, 1] == t[plays, 1]).mean()))
+    return dict(wait=float((a[~plays, 0] == 0).mean()), play=float((a[plays, 0] > 0).mean()),
+                role=float((a[plays, 0] == t[plays, 0]).mean()), lane=float((a[plays, 1] == t[plays, 1]).mean()))
 
 
-def evaluate(agent, opponent, matches, fly_deck, share, seed):
-    env = RoyaleEnv(matches, OPPONENTS[opponent], fly_deck=fly_deck, fly_deck_share=share, seed=seed)
+def evaluate(agent, opponent, matches, fly_deck, share, seed, guard=False):
+    env = RoyaleEnv(matches, OPPONENTS[opponent], fly_deck=fly_deck, fly_deck_share=share, seed=seed, guard=guard,
+                    heads=agent.heads)
     f, done = env.reset(), False
     while not done:
         f, _, done = env.step(agent.act(f, env.masks(), learn=False))
@@ -110,6 +123,9 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--out", default=str(ROOT / "models/fly_royale.pt"))
+    ap.add_argument("--split", action="store_true", help="separate play?/role/lane heads (see env.SPLIT_HEADS)")
+    ap.add_argument("--wait-keep", type=float, default=1.0, help="share of coach 'wait' decisions taught (balances plays)")
+    ap.add_argument("--n-kc", type=int, default=2500)
     ap.add_argument("--dataset", help="save recorded decisions here (.npz), or reuse them if the file exists")
     args = ap.parse_args()
     if args.threads:
@@ -141,11 +157,12 @@ def main():
     print("2. teaching")
     B = args.teach_batch
     for ep in range(args.epochs):
-        perm = rng.permutation(train)
+        keep = (A[train, 0] > 0) | (rng.random(len(train)) < args.wait_keep)
+        perm = rng.permutation(train[keep])
         for s in range(0, len(perm) - B + 1, B):
             b = perm[s:s + B]
-            agent.act(X[b], [M[b], np.ones((B, 2), bool)], learn=False)
-            agent.teach(A[b], ACT[b])
+            agent.act(X[b], brain_masks_batch(agent, M[b]), learn=False)
+            agent.teach(*encode(A[b], ACT[b], agent.heads))
         log.append(dict(stage=f"epoch {ep + 1}", agreement=agreement(agent, X[test], M[test], A[test])))
         print(f"   epoch {ep + 1}: agreement {log[-1]['agreement']}  ({time.time() - t0:.0f}s)", flush=True)
 

@@ -3,10 +3,13 @@
 Observations are binary situation channels (each drives a group of PNs):
 elixir, which card roles are in hand / ready, per-lane threats by type,
 own pushes, tower health, tempo (double elixir, enemy elixir estimate) and
-spell value. The brain answers with two heads:
+spell value. The brain answers with action heads, in one of two layouts:
 
-  role: 0 = wait, 1..15 = play a card of ROLES[role - 1]
-  lane: 0 = left, 1 = right
+  HEADS (first brains):  role (0 = wait, 1..15 = play a card of ROLES[role - 1]); lane (0 left, 1 right)
+  SPLIT_HEADS:           play (0 = wait, 1 = play); role (0..14 = ROLES[i]); lane
+
+The split layout keeps "when to play" apart from "what to play", so the
+many waits don't drown out the card choice.
 
 ``pick_card`` turns (role, lane) into the best card in hand with that role,
 and ``strategy.place`` into a drop spot.
@@ -23,6 +26,7 @@ from .strategy import Coach, View, auto_ability, place, spell_spot
 
 N_ROLES = len(ROLES)
 HEADS = (N_ROLES + 1, 2)
+SPLIT_HEADS = (2, N_ROLES, 2)
 ELIXIR_EDGES = (2, 3, 4, 5, 7, 9)
 
 
@@ -98,6 +102,33 @@ def role_mask(view: View) -> np.ndarray:
     return m
 
 
+def brain_masks(view: View, heads=HEADS, no_wait: bool = False) -> list[np.ndarray]:
+    """Allowed options per head for one situation (``no_wait``: must play if any card can be played)."""
+    m = role_mask(view)
+    if no_wait and m[1:].any():
+        m[0] = False
+    if tuple(heads) == SPLIT_HEADS:
+        return [np.array([m[0], m[1:].any()]), m[1:] if m[1:].any() else np.ones(N_ROLES, bool), np.ones(2, bool)]
+    return [m, np.ones(2, bool)]
+
+
+def decode(action, heads=HEADS) -> tuple[int, int]:
+    """A brain action in either layout -> (role index with 0 = wait, lane)."""
+    a = [int(x) for x in np.asarray(action).ravel()]
+    if tuple(heads) == SPLIT_HEADS:
+        return (1 + a[1] if a[0] == 1 else 0), a[2]
+    return a[0], a[1]
+
+
+def encode(acts: np.ndarray, active: np.ndarray, heads=HEADS) -> tuple[np.ndarray, np.ndarray]:
+    """Teacher actions (role with 0 = wait, lane) and active flags -> the given layout."""
+    if tuple(heads) != SPLIT_HEADS:
+        return acts, active
+    play = acts[:, 0] > 0
+    return (np.stack([play.astype(np.int64), np.maximum(acts[:, 0] - 1, 0), acts[:, 1]], 1),
+            np.stack([np.ones(len(acts), bool), play, active[:, 1] & play], 1))
+
+
 def pick_card(view: View, role: str) -> str | None:
     """The card in hand with this role that fits the situation best."""
     db = view.db
@@ -117,17 +148,19 @@ def pick_card(view: View, role: str) -> str | None:
 
 
 class RoyaleEnv:
-    heads = HEADS
     n_channels = N_CHANNELS
 
     def __init__(self, batch: int, opponent_factory, fly_deck: list[str] | None = None, fly_deck_share: float = 0.3,
-                 decision_every: float = 1.0, seed: int = 0, leak_penalty: float = 0.02, damage_weight: float = 0.5):
+                 decision_every: float = 1.0, seed: int = 0, leak_penalty: float = 0.02, damage_weight: float = 0.5,
+                 guard: bool = False, heads=HEADS):
         self.batch = batch
         self.opponent_factory = opponent_factory
         self.fly_deck = fly_deck
         self.fly_deck_share = fly_deck_share
         self.decision_every = decision_every
         self.leak_penalty, self.damage_weight = leak_penalty, damage_weight
+        self.guard = guard            # coach guard on the brain's moves (see guard.py)
+        self.heads = tuple(heads)
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.db = load()
@@ -156,7 +189,8 @@ class RoyaleEnv:
         return np.stack([features(v) for v in self.views()])
 
     def masks(self) -> list[np.ndarray]:
-        return [np.stack([role_mask(v) for v in self.views()]), np.ones((self.batch, 2), dtype=bool)]
+        per = [brain_masks(v, self.heads) for v in self.views()]
+        return [np.stack([p[h] for p in per]) for h in range(len(self.heads))]
 
     def teacher(self) -> tuple[np.ndarray, np.ndarray]:
         acts = np.zeros((self.batch, 2), dtype=np.int64)
@@ -165,7 +199,7 @@ class RoyaleEnv:
             card, lane = self.coach.suggest(v)
             acts[i] = (0 if card is None else 1 + ROLES.index(self.db.cards[card].role), lane)
             active[i, 1] = card is not None
-        return acts, active
+        return encode(acts, active, self.heads)
 
     @staticmethod
     def _score(sim: Sim):
@@ -173,15 +207,24 @@ class RoyaleEnv:
         return lost[1], lost[0], sim.players[0].crowns, sim.players[1].crowns, sim.players[0].leaked
 
     def step(self, actions: np.ndarray, record: bool = False, on_tick=None):
-        actions = np.asarray(actions).reshape(self.batch, 2)
+        actions = np.asarray(actions).reshape(self.batch, len(self.heads))
         reward = np.zeros(self.batch, dtype=np.float32)
         self.last_cards = [None] * self.batch
         for i, sim in enumerate(self.sims):
             if self.done[i]:
                 continue
             opp = self.opponents[i].decide(sim, 1)
-            role, lane = int(actions[i, 0]), int(actions[i, 1])
-            if role > 0:
+            role, lane = decode(actions[i], self.heads)
+            if self.guard:
+                from .guard import guarded_action
+
+                view = View(sim, 0)
+                card, lane, _ = guarded_action(view, role, lane, self.coach)
+                if card is not None:
+                    x, y = place(view, card, lane)
+                    if sim.play(0, card, x, y):
+                        self.last_cards[i] = card
+            elif role > 0:
                 view = View(sim, 0)
                 card = pick_card(view, ROLES[role - 1])
                 if card is not None:

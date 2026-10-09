@@ -35,8 +35,9 @@ import torch
 
 from ..envs.royale.db import ROLES, load
 from ..envs.royale.decks import load_deck
-from ..envs.royale.env import features, pick_card, role_mask
-from ..envs.royale.strategy import View, place
+from ..envs.royale.env import HEADS, brain_masks, decode, features, pick_card
+from ..envs.royale.guard import guarded_action
+from ..envs.royale.strategy import Coach, View, place
 from .adb import Adb
 from .cards import OFFICIAL_DIR, DeckTracker, download_official, fill_deck
 from .layout import Layout
@@ -111,11 +112,13 @@ class Bot:
     """One decision per call to :meth:`step`; ``adb`` does the tapping (None = dry run)."""
 
     def __init__(self, agent, perception: Perception, layout: Layout, deck: list[str], adb=None, learn: bool = False,
-                 auto_deck: bool = True):
+                 auto_deck: bool = True, guard: bool = True):
         self.agent, self.per, self.lay, self.adb, self.learn = agent, perception, layout, adb, learn
         self.db = load()
         self.tracker = DeckTracker() if auto_deck else None
         self.leak_at: float | None = 9.5
+        self.guard = guard
+        self.coach = Coach()
         self.set_deck(deck)
         self.battle_start = None
         self.prev_score = None
@@ -184,10 +187,11 @@ class Bot:
             self.champion, self.champion_played_at = champion, None
         sim = build_sim(obs, now - self.battle_start, deck, db=self.db)
         view = View(sim, 0)
-        mask = role_mask(view)
-        if self.leak_at is not None and view.elixir >= self.leak_at and mask[1:].any():
-            mask[0] = False                      # full elixir: waiting would waste it, so the brain must pick a card
-        a = self.agent.act(features(view)[None], [mask[None], np.ones((1, 2), bool)], learn=self.learn)[0]
+        heads = tuple(getattr(self.agent, "heads", HEADS))
+        # Full elixir: waiting would waste it, so the brain must pick a card.
+        no_wait = self.leak_at is not None and view.elixir >= self.leak_at
+        masks = brain_masks(view, heads, no_wait)
+        a = self.agent.act(features(view)[None], [m[None] for m in masks], learn=self.learn)[0]
         if self.learn:
             score = tower_score(obs.towers)
             if self.prev_score is not None:
@@ -196,21 +200,28 @@ class Bot:
                 if r:
                     self.agent.reward(np.array([np.clip(r, -1, 1)], np.float32))
             self.prev_score = score
-        out = dict(obs=obs, action="wait", card=None, role=None, lane=int(a[1]), slot_xy=None, target_xy=None)
-        if a[0] > 0:
-            role = ROLES[int(a[0]) - 1]
-            card = pick_card(view, role)
-            out["role"] = role
-            if card is not None and card in obs.hand:
-                x, y = place(view, card, int(a[1]))
-                cx, cy = self.lay.hand_slots[obs.hand.index(card)].center()
-                out.update(card=card, slot_xy=(int(cx * w), int(cy * h)), target_xy=self.lay.tile_to_px(x, y, w, h),
-                           action=f"{card} ({role}) {'left' if a[1] == 0 else 'right'} -> tile ({x:.1f},{y:.1f})")
-                if self.adb is not None:
-                    self.adb.play_card(out["slot_xy"], out["target_xy"])
-                    self.played += 1
-                    if card == self.champion:
-                        self.champion_played_at = now
+        role_i, lane = decode(a, heads)
+        out = dict(obs=obs, action="wait", card=None, role=ROLES[role_i - 1] if role_i > 0 else None, lane=lane,
+                   slot_xy=None, target_xy=None, who="fly")
+        if self.guard:
+            card, lane, out["who"] = guarded_action(view, role_i, lane, self.coach)
+        else:
+            card = pick_card(view, ROLES[role_i - 1]) if role_i > 0 else None
+        if card is not None and card in obs.hand:
+            role = self.db.cards[card].role
+            x, y = place(view, card, lane)
+            cx, cy = self.lay.hand_slots[obs.hand.index(card)].center()
+            who = "" if out["who"] == "fly" else f" [{out['who']}]"
+            out.update(card=card, role=role, lane=lane, slot_xy=(int(cx * w), int(cy * h)),
+                       target_xy=self.lay.tile_to_px(x, y, w, h),
+                       action=f"{card} ({role}) {'left' if lane == 0 else 'right'} -> tile ({x:.1f},{y:.1f}){who}")
+            if self.adb is not None:
+                self.adb.play_card(out["slot_xy"], out["target_xy"])
+                self.played += 1
+                if card == self.champion:
+                    self.champion_played_at = now
+        elif out["who"] == "veto":
+            out["action"] = "wait (spell vetoed: nothing worth hitting)"
         if out["card"] is None and self._maybe_ability(view, now, w, h):
             out["action"] = "champion ability"
         return out
@@ -226,6 +237,7 @@ def main():
     ap.add_argument("--layout", default="layout.json", help="from 'calibrate pick' (defaults are estimates)")
     ap.add_argument("--templates", default="templates/cards", help="card pictures from 'calibrate templates' (optional)")
     ap.add_argument("--official", default=str(OFFICIAL_DIR), help="official card art (downloaded on first run)")
+    ap.add_argument("--no-guard", action="store_true", help="pure fly brain: no coach rules on top of its moves")
     ap.add_argument("--no-auto-deck", action="store_true", help="don't learn the deck from the hand; use --deck only")
     ap.add_argument("--dry-run", action="store_true", help="read the screen and decide, but never tap")
     ap.add_argument("--learn", action="store_true", help="keep learning from tower damage during real matches")
@@ -260,7 +272,7 @@ def main():
     debug.mkdir(parents=True, exist_ok=True)
 
     bot = Bot(agent, per, lay, deck, adb=None if args.dry_run else adb, learn=args.learn,
-              auto_deck=not args.no_auto_deck)
+              auto_deck=not args.no_auto_deck, guard=not args.no_guard)
     last_seen, matches = 0.0, 0
     try:
         while True:

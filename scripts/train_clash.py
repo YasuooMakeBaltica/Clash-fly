@@ -45,7 +45,8 @@ def make_agent(args, probe=None):
         plast_cfg=PlasticityConfig(mode=args.mode, lr=args.lr, recovery=args.recovery,
                                    trace_decay=args.trace_decay),
         cfg=AgentConfig(action_groups="random", seed=args.seed, decision_steps=args.decision_ms,
-                        epsilon=args.epsilon, rpe_rate=args.rpe_rate),
+                        epsilon=args.epsilon, rpe_rate=args.rpe_rate,
+                        mbon_rate_hz=getattr(args, "mbon_rate", 20.0)),
     )
 
 
@@ -163,6 +164,7 @@ def main():
     ap.add_argument("--trace-decay", type=float, default=0.7)
     ap.add_argument("--rpe-rate", type=float, default=0.0)
     ap.add_argument("--decision-ms", type=int, default=40)
+    ap.add_argument("--mbon-rate", type=float, default=20.0, help="calibration target MBON rate (Hz)")
     ap.add_argument("--epsilon", type=float, default=0.03)
     ap.add_argument("--eval-every", type=int, default=5, help="rounds between evaluations")
     ap.add_argument("--eval-matches", type=int, default=32)

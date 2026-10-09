@@ -179,12 +179,17 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    press Save. `--no-auto-deck` turns the automatic update off.
 5. **Calibrate** (start a Training Camp or friendly battle first):
 
-   ```bat
-   set ADB="C:\LDPlayer\LDPlayer9\adb.exe"
-   %ADB% devices
-   python -m flybrain.real.calibrate screenshot --adb %ADB% --out shot.png
+   In PowerShell (the default Windows terminal):
+
+   ```powershell
+   $ADB = "C:\LDPlayer\LDPlayer9\adb.exe"
+   & $ADB devices
+   python -m flybrain.real.calibrate screenshot --adb $ADB --out shot.png
    python -m flybrain.real.calibrate check --image shot.png
    ```
+
+   (In the old Command Prompt, `cmd`, use `set ADB=C:\LDPlayer\LDPlayer9\adb.exe`
+   and `%ADB%` instead of `$ADB`.)
 
    Open `shot_check.png`. If the boxes don't sit on the arena, elixir bar,
    cards and tower HP bars, run `python -m flybrain.real.calibrate pick
@@ -197,10 +202,10 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    ```
 6. **Run**:
 
-   ```bat
-   python -m flybrain.real.bot --adb %ADB% --dry-run     REM reads + decides, no taps
-   python -m flybrain.real.bot --adb %ADB%               REM plays
-   python -m flybrain.real.bot --adb %ADB% --learn       REM keeps learning from tower damage
+   ```powershell
+   python -m flybrain.real.bot --adb $ADB --dry-run     # reads + decides, no taps
+   python -m flybrain.real.bot --adb $ADB               # plays
+   python -m flybrain.real.bot --adb $ADB --learn       # keeps learning from tower damage
    ```
 
    Start battles yourself; the bot waits between them. It saves annotated

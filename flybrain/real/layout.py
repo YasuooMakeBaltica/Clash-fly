@@ -5,8 +5,8 @@ works at any resolution with the same aspect ratio. The defaults were
 measured on a real battle screenshot (LDPlayer, portrait 540x960). Check
 yours with ``python -m flybrain.real.calibrate check`` and fix boxes with
 ``python -m flybrain.real.calibrate pick`` if they are off. The king tower
-HP bars were not on that screenshot (they only show once the king is hit),
-so those two boxes are still estimates.
+HP bars (only shown once the king is hit) were measured on labelled real
+frames instead.
 
 Arena mapping: the simulator's 18x32 tile grid is mapped linearly onto the
 ``arena`` box, with tile y = 0 at the bottom (your side) and 32 at the top.
@@ -62,8 +62,10 @@ class Layout:
     # below; the crown/level icon left of each bar is not included.
     princess_bar_tiles: tuple[float, float, float, float] = (-0.87, 3.75, 1.42, 3.12)
     own_princess_bar_tiles: tuple[float, float, float, float] = (-0.87, 0.56, 1.42, -0.02)
-    king_bar_tiles: tuple[float, float, float, float] = (-0.47, 5.56, 2.67, 4.88)        # estimate
-    own_king_bar_tiles: tuple[float, float, float, float] = (-0.47, -2.08, 2.67, -2.76)  # estimate
+    # King bars only show once the king is hit; measured on ~1,400 labelled king bars in real frames
+    # (KataCR dataset, aligned to this screen like troops.py).
+    king_bar_tiles: tuple[float, float, float, float] = (-1.17, 5.3, 2.01, 4.94)
+    own_king_bar_tiles: tuple[float, float, float, float] = (-1.13, -2.16, 2.03, -2.61)
     # HSV colour ranges (OpenCV: H 0-180, S and V 0-255)
     elixir_hsv: tuple = ((135, 90, 110), (170, 255, 255))
     blue_hsv: tuple = ((95, 110, 110), (120, 255, 255))

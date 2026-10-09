@@ -213,7 +213,10 @@ def place(view: View, name: str, lane: int) -> tuple[float, float]:
             return lx + tc * 1.0, abs_y(me, 14.0 if name == "X-Bow" else 12.5)
         if c.role == "spawner":
             return WIDTH / 2 - tc * 2.0, abs_y(me, 2.5)
-        return WIDTH / 2 - tc * 1.5, abs_y(me, 6.0)           # centre: pulls troops between both towers
+        # Centre, about 6 tiles from the river: close enough to the bridge that building-targeting troops
+        # (Hog Rider, Giant ...) turn to it, and both princess towers reach troops attacking it.
+        # (Head-to-head, 400 games: 51% wins / 43% losses vs the old spot 6 tiles from the edge.)
+        return WIDTH / 2 - tc * 1.5, abs_y(me, 9.0)
     if threats:
         lead = min(threats, key=lambda u: view.fy(u.y))
         lead_fy = view.fy(lead.y)
@@ -249,8 +252,23 @@ COUNTER_ROLES = {
 }
 
 
+COACH_DEFAULTS = dict(
+    enough_defense=0.8,    # skip defending a lane when our defenders have this share of the attackers' hit points
+    hold_line=10.0,        # attackers closer than this (own-frame y) with no fitting card: save elixir instead
+    trade_margin=1.0,      # cast a spell when it hits this much more elixir than it costs
+    push_hp=800.0,         # support a counter-push of at least this many hit points
+    punish_below=2.5,      # opponent elixir at or below this: attack with the win condition
+    leak_single=9.0,       # play something at this elixir (single elixir) ...
+    leak_double=6.5,       # ... and at this elixir in double elixir
+)
+
+
 class Coach:
     name = "coach"
+
+    def __init__(self, placer=None, **params):
+        self.placer = placer or place          # where cards go (strategy.place unless overridden)
+        self.p = {**COACH_DEFAULTS, **params}
 
     def card_fit(self, view: View, name: str, prof: dict) -> bool:
         c = view.db.cards[name]
@@ -295,7 +313,7 @@ class Coach:
                 continue
             prof = view.profile(threats)
             def_hp = sum(u.hp for u in view.defenders(lane))
-            if def_hp >= 0.8 * prof["hp"] and not prof["building_targeter"]:
+            if def_hp >= self.p["enough_defense"] * prof["hp"] and not prof["building_targeter"]:
                 continue
             keys = [k for k in ("air", "building_targeter", "tank", "swarm", "tank_killer", "ranged") if prof[k]] or ["other"]
             for key in keys:
@@ -303,7 +321,7 @@ class Coach:
                     cands = [n for n in play if roles[n] == role and self.card_fit(view, n, prof)]
                     if cands:
                         return min(cands, key=lambda n: db.cards[n].elixir), lane, "defend"
-            if min(view.fy(u.y) for u in threats) < 10:
+            if min(view.fy(u.y) for u in threats) < self.p["hold_line"]:
                 return None, lane, "hold"
 
         # 3. positive spell trades
@@ -311,14 +329,14 @@ class Coach:
             c = db.cards[n]
             if c.role in ("small_spell", "big_spell"):
                 for lane in (0, 1):
-                    if spell_spot(view, n, lane)[0] >= c.elixir + 1.0:
+                    if spell_spot(view, n, lane)[0] >= c.elixir + self.p["trade_margin"]:
                         return n, lane, "trade"
 
         # 4. counter-push: support survivors, boost a big push
         for lane in (0, 1):
             push = view.pushers(lane)
             push_hp = sum(u.hp for u in push)
-            if push_hp >= 800 and view.elixir >= 4:
+            if push_hp >= self.p["push_hp"] and view.elixir >= 4:
                 if any(view.fy(u.y) > 20 for u in push) and push_hp >= 1500:
                     for n in play:
                         if n in ("Rage", "Freeze") and view.threats(lane) == []:
@@ -333,11 +351,11 @@ class Coach:
         back = view.enemy_back_tank()
         if wins and back is not None:
             return wins[0], 1 - back, "punish"
-        if wins and view.enemy_elixir() <= 2.5 and view.elixir >= db.cards[wins[0]].elixir:
+        if wins and view.enemy_elixir() <= self.p["punish_below"] and view.elixir >= db.cards[wins[0]].elixir:
             return wins[0], view.weak_lane(), "punish"
 
         # 6. don't leak elixir
-        full = 9.0 if view.sim.elixir_multiplier == 1 else 6.5
+        full = self.p["leak_single"] if view.sim.elixir_multiplier == 1 else self.p["leak_double"]
         if view.elixir >= full:
             lane = view.weak_lane()
             if wins:
@@ -353,7 +371,7 @@ class Coach:
         card, lane = self.suggest(view)
         if card is None:
             return None
-        return Move(card, lane, *place(view, card, lane))
+        return Move(card, lane, *self.placer(view, card, lane))
 
 
 def auto_ability(sim: Sim, player: int) -> bool:

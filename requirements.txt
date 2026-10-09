@@ -1,0 +1,5 @@
+numpy>=1.24
+pandas>=2.0
+torch>=2.1          # CPU or CUDA build, see https://pytorch.org/get-started/locally/
+matplotlib>=3.7     # optional, for learning-curve plots
+pytest>=7           # tests

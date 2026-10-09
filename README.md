@@ -168,8 +168,12 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    (mobile/portrait). Settings → Other settings → **ADB debugging: open
    local connection**. Restart LDPlayer. Finish the Clash Royale tutorial by
    hand on your alt account.
-4. **Your deck**: put the 8 cards of your in-game battle deck in
-   `decks/fly.txt`, one per line (loose names like "pekka" or "log" work).
+4. **Your deck**: double-click `edit_deck.bat` (or run
+   `python -m flybrain.deck_editor`). A page opens in your browser: tap the
+   8 cards of your in-game battle deck and press Save. It writes
+   `decks/fly.txt` (you can also edit that file by hand). Change it whenever
+   you change decks in the game; a running bot picks up the new deck at the
+   next battle.
 5. **Calibrate** (start a Training Camp or friendly battle first):
 
    ```bat

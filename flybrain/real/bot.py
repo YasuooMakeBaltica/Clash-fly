@@ -202,6 +202,7 @@ def main():
         print(f"warning: {args.layout} not found, using estimated screen positions. Run calibrate first.")
     per = Perception(lay, args.templates)
     deck = load_deck(args.deck)
+    deck_mtime = Path(args.deck).stat().st_mtime
     print("deck:", deck)
     missing = [n for n in deck if n not in per.matcher.templates]
     if missing:
@@ -232,6 +233,17 @@ def main():
                 time.sleep(1.0)
                 continue
             if bot.battle_start is None:
+                if Path(args.deck).stat().st_mtime != deck_mtime:      # edited with the deck editor
+                    try:
+                        bot.deck = load_deck(args.deck)
+                        bot.champion = next((n for n in bot.deck if bot.db.cards[n].champion), None)
+                        deck_mtime = Path(args.deck).stat().st_mtime
+                        print("deck changed:", bot.deck)
+                        missing = [n for n in bot.deck if n not in per.matcher.templates]
+                        if missing:
+                            print(f"warning: no card pictures for {missing}. Run calibrate templates.")
+                    except ValueError as e:
+                        print(f"deck file has a problem, keeping the old deck: {e}")
                 bot.start_battle(t0)
                 print("battle started")
             last_seen = t0

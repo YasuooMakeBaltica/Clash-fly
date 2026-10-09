@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fly Deck Editor</title>
+<style>
+/* Layout: deck files on the left, the 8-card deck on top, the card list below. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --fg: #17212b; --muted: #5a6774; --line: #d6dce2; --soft: #e7ebef;
+  --accent: #2f5fd0; --elixir: #b03cc8; --good: #2c8a4c; --bad: #b8403a; --gold: #d29a1c;
+  --f-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #10161c; --panel: #17202a; --fg: #e3e9ef; --muted: #93a0ad; --line: #2a3640; --soft: #212b35;
+    --accent: #7d9df2; --elixir: #d27be6; --good: #5cc07f; --bad: #ef7f76; --gold: #ebb84a; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-body); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 16px; }
+h1 { font-size: 28px; margin: 0; }
+.sub { margin: 4px 0 0; color: var(--muted); }
+.grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.eyebrow { font: 600 11px var(--f-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+.files { display: grid; gap: 4px; }
+.file { width: 100%; min-width: 0; overflow-wrap: anywhere; font: inherit; text-align: left; background: transparent; color: var(--fg); border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.file.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 600; }
+.file small { color: var(--muted); font-weight: 400; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { font: 600 14px var(--f-body); border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; background: var(--accent); color: #fff; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); font-weight: 500; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:focus-visible, .pick:focus-visible, .slot:focus-visible, .file:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+input, select { font: 14px var(--f-body); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; min-width: 0; }
+.deck { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 640px) { .deck { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.slot { font: inherit; color: var(--fg); background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; min-height: 64px; padding: 6px 4px; text-align: center; display: grid; align-content: center; gap: 2px; cursor: pointer; }
+.slot.filled { border-style: solid; }
+.slot b { font-size: 12px; font-weight: 600; overflow-wrap: break-word; }
+.slot span { font: 600 12px var(--f-mono); color: var(--elixir); }
+.slot small { font-size: 10px; color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 13px var(--f-mono); color: var(--muted); }
+.stats .ok { color: var(--good); } .stats .warn { color: var(--gold); }
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; max-height: 460px; overflow-y: auto; padding-right: 4px; }
+.pick { font: inherit; text-align: left; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; cursor: pointer; display: grid; gap: 1px; }
+.pick b { font-size: 13px; font-weight: 600; }
+.pick small { font: 11px var(--f-mono); color: var(--muted); }
+.pick.in { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.msg { font-size: 14px; min-height: 1.5em; margin: 0; }
+.msg.err { color: var(--bad); } .msg.ok { color: var(--good); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Fly Deck Editor</h1>
+    <p class="sub">Tap cards to build an 8-card deck, then Save. <b>fly</b> is the deck the bot and training use; it must match the deck you equip in Clash Royale.</p>
+  </header>
+  <div class="grid">
+    <section class="panel" aria-label="Deck files">
+      <p class="eyebrow">Deck files</p>
+      <div class="files" id="files"></div>
+      <div class="row" style="flex-wrap:nowrap"><input id="new-name" placeholder="new deck name" aria-label="New deck name" style="flex:1; width:0"><button class="btn ghost" id="new">New</button></div>
+    </section>
+    <div style="display:grid; gap:16px; min-width:0">
+      <section class="panel" aria-label="Deck">
+        <div class="row" style="justify-content:space-between"><p class="eyebrow" id="deck-title">Deck</p><div class="stats" id="stats"></div></div>
+        <div class="deck" id="deck"></div>
+        <div class="row">
+          <button class="btn" id="save" disabled>Save</button>
+          <button class="btn ghost" id="revert">Undo changes</button>
+          <button class="btn ghost" id="clear">Clear</button>
+          <button class="btn ghost" id="copy-to-fly" hidden>Use as the fly's deck</button>
+        </div>
+        <p class="msg" id="msg"></p>
+      </section>
+      <section class="panel" aria-label="Cards">
+        <div class="row"><input type="search" id="search" placeholder="Search cards" aria-label="Search cards" style="flex:1"><select id="role" aria-label="Role"><option value="">All roles</option></select><select id="cost" aria-label="Elixir"><option value="">Any elixir</option></select></div>
+        <div class="picker" id="picker"></div>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const ROLE_LABEL = { win_condition: "win condition", tank_killer: "tank killer", frontline: "frontline", splash_ground: "splash ground", splash_air: "splash air", ranged: "ranged", swarm: "swarm", air: "air", cycle: "cycle", building: "building", spawner: "spawner", small_spell: "small spell", big_spell: "big spell", utility: "utility", champion: "champion" };
+const S = { cards: [], byName: {}, files: [], name: "fly", deck: [], saved: [] };
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  return r.json();
+}
+function problems(deck) {
+  if (deck.length !== 8) return `Pick ${8 - deck.length} more card${deck.length === 7 ? "" : "s"}.`;
+  if (deck.filter((n) => S.byName[n].champion).length > 1) return "Only one champion per deck.";
+  return "";
+}
+function setMsg(text, cls = "") { $("msg").textContent = text; $("msg").className = "msg " + cls; }
+function render() {
+  const files = $("files"); files.innerHTML = "";
+  for (const f of S.files) {
+    const b = document.createElement("button");
+    b.className = "file" + (f === S.name ? " on" : "");
+    b.innerHTML = `${f}${f === "fly" ? " <small>· bot uses this</small>" : ""}`;
+    b.onclick = () => openDeck(f);
+    files.append(b);
+  }
+  $("deck-title").textContent = `Deck: ${S.name}`;
+  const d = $("deck"); d.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const n = S.deck[i], el = document.createElement("button");
+    el.className = "slot" + (n ? " filled" : "");
+    if (n) { const c = S.byName[n]; el.innerHTML = `<b></b><span>${c.elixir}</span><small>${ROLE_LABEL[c.role]}</small>`; el.querySelector("b").textContent = n; el.title = "Remove"; el.onclick = () => { S.deck.splice(i, 1); render(); }; }
+    else { el.innerHTML = "<small>empty</small>"; el.disabled = true; }
+    d.append(el);
+  }
+  const cards = S.deck.map((n) => S.byName[n]);
+  const avg = cards.length ? cards.reduce((s, c) => s + c.elixir, 0) / cards.length : 0;
+  const has = (pred) => cards.some(pred);
+  const st = [
+    `avg elixir ${cards.length ? avg.toFixed(1) : "–"}`,
+    `<span class="${has((c) => c.role === "win_condition") ? "ok" : "warn"}">win condition ${has((c) => c.role === "win_condition") ? "✓" : "missing"}</span>`,
+    `<span class="${cards.filter((c) => c.type === "spell").length ? "ok" : "warn"}">spells ${cards.filter((c) => c.type === "spell").length}</span>`,
+  ];
+  $("stats").innerHTML = st.join("");
+  const prob = problems(S.deck), changed = S.deck.join("|") !== S.saved.join("|");
+  $("save").disabled = !!prob || !changed;
+  $("copy-to-fly").hidden = S.name === "fly" || !!prob;
+  if (prob) setMsg(prob); else if (changed) setMsg("Unsaved changes."); else if (!$("msg").classList.contains("ok") && !$("msg").classList.contains("err")) setMsg("");
+  const q = $("search").value.trim().toLowerCase(), rf = $("role").value, cf = $("cost").value;
+  const pk = $("picker"); pk.innerHTML = "";
+  for (const c of S.cards) {
+    if (rf && c.role !== rf) continue;
+    if (cf && String(c.elixir) !== cf) continue;
+    if (q && !(c.name.toLowerCase().includes(q) || ROLE_LABEL[c.role].includes(q))) continue;
+    const b = document.createElement("button");
+    b.className = "pick" + (S.deck.includes(c.name) ? " in" : "");
+    b.innerHTML = `<b></b><small>${c.elixir} · ${ROLE_LABEL[c.role]}</small>`;
+    b.querySelector("b").textContent = c.name;
+    b.onclick = () => {
+      if (S.deck.includes(c.name)) S.deck = S.deck.filter((x) => x !== c.name);
+      else if (S.deck.length < 8) S.deck.push(c.name);
+      else { setMsg("The deck is full: tap a card in the deck to remove it first.", "err"); return; }
+      setMsg(""); render();
+    };
+    pk.append(b);
+  }
+}
+async function openDeck(name) {
+  if (S.deck.join("|") !== S.saved.join("|") && !window.__discard) { setMsg("Save or undo changes before switching decks.", "err"); return; }
+  const d = await api(`/api/deck/${encodeURIComponent(name)}`);
+  S.name = name; S.deck = d.cards.slice(); S.saved = d.cards.slice();
+  setMsg(d.error ? `This file has a problem: ${d.error}` : "", d.error ? "err" : "");
+  render();
+}
+async function save(name, cards) {
+  const r = await api("/api/save", { name, cards });
+  if (r.ok) { S.files = r.decks; if (name === S.name) S.saved = cards.slice(); setMsg(`Saved decks/${name}.txt`, "ok"); }
+  else setMsg(r.error, "err");
+  render();
+}
+$("save").onclick = () => save(S.name, S.deck);
+$("copy-to-fly").onclick = () => save("fly", S.deck);
+$("revert").onclick = () => { S.deck = S.saved.slice(); setMsg(""); render(); };
+$("clear").onclick = () => { S.deck = []; render(); };
+$("new").onclick = () => {
+  const n = $("new-name").value.trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(n)) { setMsg("Deck names can use letters, digits, - and _.", "err"); return; }
+  if (!S.files.includes(n)) S.files.push(n);
+  S.name = n; S.deck = []; S.saved = []; $("new-name").value = ""; setMsg("New deck: pick 8 cards, then Save."); render();
+};
+for (const id of ["search", "role", "cost"]) $(id).addEventListener("input", render);
+(async () => {
+  const st = await api("/api/state");
+  S.cards = st.cards; S.files = st.decks;
+  for (const c of S.cards) S.byName[c.name] = c;
+  for (const r of Object.keys(ROLE_LABEL)) { const o = document.createElement("option"); o.value = r; o.textContent = ROLE_LABEL[r]; $("role").append(o); }
+  for (const e of [...new Set(S.cards.map((c) => c.elixir))].sort((a, b) => a - b)) { const o = document.createElement("option"); o.value = e; o.textContent = `${e} elixir`; $("cost").append(o); }
+  await openDeck(S.files[0] || "fly");
+})();
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import torch
 from flybrain.envs.royale.db import ROLES, load
 from flybrain.envs.royale.env import features, pick_card, role_mask
 from flybrain.envs.royale.sim import Sim
+from flybrain.envs.royale.guard import guard
 from flybrain.envs.royale.strategy import Coach, View, place
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,9 @@ SCENARIO = dict(
         [170, "deploy", 1, "Bowler", 4.0, 24.0], [180, "deploy", 0, "Musketeer", 6.0, 4.0],
     ],
     snapshot_ticks=[50, 120, 200, 320],
+    # placement of cards that need not be in hand (buildings, spells, win conditions ...)
+    place_cards=["Cannon", "Inferno Tower", "Tesla", "Tombstone", "X-Bow", "Hog Rider", "Golem", "Musketeer",
+                 "Valkyrie", "Minions", "Skeleton Army", "Fireball", "The Log", "Rage", "Miner"],
 )
 
 
@@ -67,6 +71,10 @@ def run_python():
             coach=[list(Coach().suggest(v)) for v in views],
             place=[[[list(place(v, n, ln)) for ln in (0, 1)] for n in v.hand()] for v in views],
             picks=[[pick_card(v, r) for r in ROLES] for v in views],
+            plan=[list(Coach().plan(v)) for v in views],
+            guard=[[[list(guard(v, c, ln)) for ln in (0, 1)] for c in [None] + [pick_card(v, r) for r in ROLES]]
+                   for v in views],
+            place_any=[[[list(place(v, n, ln)) for ln in (0, 1)] for n in SCENARIO["place_cards"]] for v in views],
         ))
     return snaps
 
@@ -91,6 +99,9 @@ def test_full_simulator_matches(tmp_path):
         assert p["coach"] == j["coach"]
         np.testing.assert_allclose(p["place"], j["place"], atol=1e-9)
         assert p["picks"] == j["picks"]
+        assert p["plan"] == j["plan"]
+        assert p["guard"] == j["guard"]
+        np.testing.assert_allclose(p["place_any"], j["place_any"], atol=1e-9)
 
 
 def test_royale_brain_matches(tmp_path):

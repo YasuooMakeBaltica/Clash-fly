@@ -838,7 +838,13 @@ const RoyaleCore = (() => {
     return best;
   }
 
+  // strategy.PLACE_DEFAULTS / COACH_DEFAULTS
+  const PLACE = { building_y: 9.0, melee_ahead: 2.5, ranged_y: 4.5, ranged_dx: 1.5, bridge_y: 14.0, support_behind: 2.0 };
+  const COACH = { enough_defense: 0.8, hold_line: 10.0, trade_margin: 1.5, push_hp: 800.0, punish_below: 2.5,
+                  leak_single: 9.8, leak_double: 6.5 };
+
   function place(view, name, lane) {
+    const P = PLACE;
     const db = view.db, me = view.me;
     let c = db.cards[name];
     if (c.special === "mirror" && view.p.last_card) { c = db.cards[view.p.last_card]; name = c.name; }
@@ -872,23 +878,23 @@ const RoyaleCore = (() => {
     if (c.type === "building") {
       if (SIEGE.has(name)) return [lx + tc * 1.0, absY(me, name === "X-Bow" ? 14 : 12.5)];
       if (c.role === "spawner") return [WIDTH / 2 - tc * 2, absY(me, 2.5)];
-      return [WIDTH / 2 - tc * 1.5, absY(me, 6)];
+      return [WIDTH / 2 - tc * 1.5, absY(me, P.building_y)];
     }
     if (threats.length) {
       const lead = minBy(threats, (u) => view.fy(u.y)), lfy = view.fy(lead.y);
-      if (["ranged", "splash_air", "champion"].includes(c.role) && !["Golden Knight", "Mighty Miner", "Monk"].includes(c.name)) return [lx + 1.5 * tc, absY(me, 4.5)];
+      if (["ranged", "splash_air", "champion"].includes(c.role) && !["Golden Knight", "Mighty Miner", "Monk"].includes(c.name)) return [lx + P.ranged_dx * tc, absY(me, P.ranged_y)];
       if (lfy > RIVER_LO) return [lx + tc, absY(me, 11)];
       if (["swarm", "cycle", "air"].includes(c.role)) return [lead.x, absY(me, Math.max(0.5, lfy - 1))];
-      return [clip(lead.x + tc, 0.5, WIDTH - 0.5), absY(me, Math.max(0.5, lfy - 2.5))];
+      return [clip(lead.x + tc, 0.5, WIDTH - 0.5), absY(me, Math.max(0.5, lfy - P.melee_ahead))];
     }
     if (c.role === "win_condition") {
       if (HEAVY.has(name) && view.elixir < 9 && view.sim.elixirMultiplier === 1) return [WIDTH / 2 - tc * 1.5, absY(me, 1)];
-      return [lx, absY(me, 14)];
+      return [lx, absY(me, P.bridge_y)];
     }
     const pushers = view.pushers(lane);
-    if (pushers.length) { const lead = maxBy(pushers, (u) => view.fy(u.y)); return [clip(lead.x, 0.5, WIDTH - 0.5), absY(me, Math.min(14, view.fy(lead.y) - 2))]; }
+    if (pushers.length) { const lead = maxBy(pushers, (u) => view.fy(u.y)); return [clip(lead.x, 0.5, WIDTH - 0.5), absY(me, Math.min(14, view.fy(lead.y) - P.support_behind))]; }
     if (["ranged", "splash_air"].includes(c.role)) return [lx, absY(me, 10)];
-    return [lx, absY(me, 14)];
+    return [lx, absY(me, P.bridge_y)];
   }
 
   const COUNTER_ROLES = {
@@ -913,14 +919,16 @@ const RoyaleCore = (() => {
       if (["win_condition", "spawner", "utility"].includes(c.role) && c.name !== "Goblin Giant") return false;
       return true;
     },
-    suggest(view) {
+    suggest(view) { const [card, lane] = this.plan(view); return [card, lane]; },
+    // [card or null, lane, reason]: finish, defend, hold, trade, counterpush, punish, leak or null
+    plan(view) {
       const db = view.db, play = view.playable(), roles = {};
       for (const n of play) roles[n] = db.cards[n].role;
       for (const n of play) {
         const c = db.cards[n];
         if (c.type === "spell" && c.projectile && c.special !== "rolling") {
           const dmg = c.projectile.damage * Math.max(1, c.waves) * c.projectile.tower_factor;
-          for (const lane of [0, 1]) { const t = view.sim.tower(view.foe, "princess", lane); if (t.alive && t.hp <= dmg) return [n, lane]; }
+          for (const lane of [0, 1]) { const t = view.sim.tower(view.foe, "princess", lane); if (t.alive && t.hp <= dmg) return [n, lane, "finish"]; }
         }
       }
       const lanes = [0, 1].sort((a, b) => view.threatHp(b) - view.threatHp(a));
@@ -929,45 +937,69 @@ const RoyaleCore = (() => {
         if (!threats.length) continue;
         const prof = view.profile(threats);
         const defHp = view.defenders(lane).reduce((s, u) => s + u.hp, 0);
-        if (defHp >= 0.8 * prof.hp && !prof.building_targeter) continue;
+        if (defHp >= COACH.enough_defense * prof.hp && !prof.building_targeter) continue;
         let keys = ["air", "building_targeter", "tank", "swarm", "tank_killer", "ranged"].filter((k) => prof[k]);
         if (!keys.length) keys = ["other"];
         for (const key of keys) for (const role of COUNTER_ROLES[key]) {
           const cands = play.filter((n) => roles[n] === role && this.cardFit(view, n, prof));
-          if (cands.length) return [minBy(cands, (n) => db.cards[n].elixir), lane];
+          if (cands.length) return [minBy(cands, (n) => db.cards[n].elixir), lane, "defend"];
         }
-        if (Math.min(...threats.map((u) => view.fy(u.y))) < 10) return [null, lane];
+        if (Math.min(...threats.map((u) => view.fy(u.y))) < COACH.hold_line) return [null, lane, "hold"];
       }
       for (const n of play) {
         const c = db.cards[n];
-        if (c.role === "small_spell" || c.role === "big_spell") for (const lane of [0, 1]) if (spellSpot(view, n, lane)[0] >= c.elixir + 1.0) return [n, lane];
+        if (c.role === "small_spell" || c.role === "big_spell") for (const lane of [0, 1]) if (spellSpot(view, n, lane)[0] >= c.elixir + COACH.trade_margin) return [n, lane, "trade"];
       }
       for (const lane of [0, 1]) {
         const push = view.pushers(lane), pushHp = push.reduce((s, u) => s + u.hp, 0);
-        if (pushHp >= 800 && view.elixir >= 4) {
-          if (push.some((u) => view.fy(u.y) > 20) && pushHp >= 1500) for (const n of play) if ((n === "Rage" || n === "Freeze") && view.threats(lane).length === 0) return [n, lane];
+        if (pushHp >= COACH.push_hp && view.elixir >= 4) {
+          if (push.some((u) => view.fy(u.y) > 20) && pushHp >= 1500) for (const n of play) if ((n === "Rage" || n === "Freeze") && view.threats(lane).length === 0) return [n, lane, "counterpush"];
           for (const role of ["ranged", "splash_air", "splash_ground", "air", "swarm", "frontline", "champion"]) {
             const cands = play.filter((n) => roles[n] === role);
-            if (cands.length) return [cands[0], lane];
+            if (cands.length) return [cands[0], lane, "counterpush"];
           }
         }
       }
       const wins = play.filter((n) => roles[n] === "win_condition");
       const back = view.enemyBackTank();
-      if (wins.length && back !== null) return [wins[0], 1 - back];
-      if (wins.length && view.enemyElixir() <= 2.5 && view.elixir >= db.cards[wins[0]].elixir) return [wins[0], view.weakLane()];
-      const full = view.sim.elixirMultiplier === 1 ? 9.0 : 6.5;
+      if (wins.length && back !== null) return [wins[0], 1 - back, "punish"];
+      if (wins.length && view.enemyElixir() <= COACH.punish_below && view.elixir >= db.cards[wins[0]].elixir) return [wins[0], view.weakLane(), "punish"];
+      const full = view.sim.elixirMultiplier === 1 ? COACH.leak_single : COACH.leak_double;
       if (view.elixir >= full) {
         const lane = view.weakLane();
-        if (wins.length) return [wins[0], lane];
+        if (wins.length) return [wins[0], lane, "leak"];
         for (const role of ["spawner", "champion", "frontline", "tank_killer", "splash_ground", "ranged", "swarm", "cycle"]) {
           const cands = play.filter((n) => roles[n] === role);
-          if (cands.length) return [cands[0], lane];
+          if (cands.length) return [cands[0], lane, "leak"];
         }
       }
-      return [null, 0];
+      return [null, 0, null];
     },
   };
+
+  // ----------------------------------------------------------------- guard.py
+  const TAKE_OVER = new Set(["finish", "defend"]), WHEN_IDLE = new Set(["trade", "counterpush", "punish", "leak"]);
+  // The fly decides; coach rules step in where it is weak. Returns [card or null, lane, who].
+  function guard(view, card, lane) {
+    const [cCard, cLane, reason] = Coach.plan(view);
+    if (TAKE_OVER.has(reason) && cCard !== null) return [cCard, cLane, `coach:${reason}`];
+    if (card === null) {
+      if (WHEN_IDLE.has(reason) && cCard !== null) return [cCard, cLane, `coach:${reason}`];
+      return [null, lane, "fly"];
+    }
+    const c = view.db.cards[card];
+    if (c.type === "spell" && !c.summons.length && card !== cCard && spellSpot(view, card)[0] < c.elixir) return [null, lane, "veto"];
+    if (![0, 1].some((ln) => view.threats(ln).length)) {
+      if (c.role === "building") return [null, lane, "veto"];
+      const win = view.p.hand.find((n) => view.db.cards[n].role === "win_condition");
+      if (win !== undefined && card !== win && c.role !== "win_condition") {
+        if (view.elixir >= view.db.cards[win].elixir) return [win, cCard !== null ? cLane : view.weakLane(), "coach:win_condition"];
+        return [null, lane, "save"];
+      }
+    }
+    if (cCard !== null) lane = cLane;
+    return [card, lane, "fly"];
+  }
 
   function autoAbility(sim, player) {
     for (const u of sim.units) {
@@ -1054,7 +1086,7 @@ const RoyaleCore = (() => {
   }
 
   return { WIDTH, HEIGHT, RIVER_LO, RIVER_HI, LANE_X, DT, TOWER, ROLES, CHANNELS, REGULATION, OVERTIME_END, DOUBLE_AT, TRIPLE_AT,
-    buildDB, Sim, View, place, spellSpot, Coach, autoAbility, features, roleMask, pickCard, hitsAir, frameY, absY, laneOf };
+    buildDB, Sim, View, place, spellSpot, Coach, guard, PLACE, COACH, autoAbility, features, roleMask, pickCard, hitsAir, frameY, absY, laneOf };
 })();
 
 if (typeof module !== "undefined") module.exports = RoyaleCore;

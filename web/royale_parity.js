@@ -31,6 +31,9 @@ for (const at of sc.snapshot_ticks) {
     coach: views.map((v) => R.Coach.suggest(v)),
     place: views.map((v) => v.hand().map((n) => [0, 1].map((l) => R.place(v, n, l)))),
     picks: views.map((v) => R.ROLES.map((r) => R.pickCard(v, r))),
+    plan: views.map((v) => R.Coach.plan(v)),
+    guard: views.map((v) => [null].concat(R.ROLES.map((r) => R.pickCard(v, r))).map((c) => [0, 1].map((l) => R.guard(v, c === undefined ? null : c, l)))),
+    place_any: views.map((v) => (sc.place_cards || []).map((n) => [0, 1].map((l) => R.place(v, n, l)))),
   });
 }
 if (process.argv[3]) {

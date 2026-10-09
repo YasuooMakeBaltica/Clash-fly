@@ -111,6 +111,8 @@ select, input[type="search"] { font: 14px var(--f-body); color: var(--fg); backg
       <button class="btn ghost" id="clear">Clear</button>
       <label class="record" for="fly-deck-mode">The fly plays</label>
       <select id="fly-deck-mode"><option value="fly">its own deck</option><option value="random">a random deck</option><option value="mirror">your deck</option></select>
+      <label class="record" for="fly-guard">with</label>
+      <select id="fly-guard"><option value="guard">the coach guard (like the real bot)</option><option value="pure">only its brain</option></select>
     </div>
     <p class="note" id="fly-deck-text"></p>
     <div class="row"><input type="search" id="search" placeholder="Search cards or roles" aria-label="Search cards"><select id="role-filter" aria-label="Filter by role"><option value="">All roles</option></select></div>
@@ -172,8 +174,9 @@ const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n
 const brain = new ClashCore.Brain(BRAIN_DATA, (Date.now() & 0xffff) + 1);
 const rng = ClashCore.rng((Math.random() * 2 ** 31) | 0);
 const G = { deck: [], sim: null, running: false, paused: false, sel: null, acc: 0, last: 0, prev: new Map(), next: 1, flash: null, flyDeck: null, record: { w: 0, d: 0, l: 0 } };
-try { const s = JSON.parse(localStorage.getItem("beat-the-fly-full") || "null"); if (s) { G.deck = s.deck || []; G.record = s.record || G.record; } } catch (e) {}
-const save = () => { try { localStorage.setItem("beat-the-fly-full", JSON.stringify({ deck: G.deck, record: G.record })); } catch (e) {} };
+try { const s = JSON.parse(localStorage.getItem("beat-the-fly-full") || "null"); if (s) { G.deck = s.deck || []; G.record = s.record || G.record; if (s.guard) $("fly-guard").value = s.guard; } } catch (e) {}
+const save = () => { try { localStorage.setItem("beat-the-fly-full", JSON.stringify({ deck: G.deck, record: G.record, guard: $("fly-guard").value })); } catch (e) {} };
+$("fly-guard").onchange = save;
 const ROLE_LABEL = { win_condition: "win condition", tank_killer: "tank killer", frontline: "frontline", splash_ground: "splash ground", splash_air: "splash air", ranged: "ranged", swarm: "swarm", air: "air", cycle: "cycle", building: "building", spawner: "spawner", small_spell: "small spell", big_spell: "big spell", utility: "utility", champion: "champion" };
 const short = (name) => { const w = name.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^A-Za-z ]/g, " ").split(/\s+/).filter(Boolean); return w.length > 1 ? (w[0][0] + w[1][0]).toUpperCase() : (w[0] || "?").slice(0, 2); };
 const fmt = (t) => { const s = Math.max(0, Math.ceil(t)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -270,13 +273,14 @@ function decideFly() {
   const f = R.features(v), mask = R.roleMask(v);
   const r = brain.decide(f, mask, 0);
   let did = "Wait";
-  if (r.card > 0) {
-    const card = R.pickCard(v, R.ROLES[r.card - 1]);
-    if (card) {
-      const [x, y] = R.place(v, card, r.lane);
-      if (sim.play(1, card, x, y)) { did = `${card} (${ROLE_LABEL[R.ROLES[r.card - 1]]}), ${r.lane ? "right" : "left"} lane`; addLog(1, card, x); }
-    }
-  }
+  let card = r.card > 0 ? R.pickCard(v, R.ROLES[r.card - 1]) : null, lane = r.lane, who = "fly";
+  if ($("fly-guard").value === "guard") [card, lane, who] = R.guard(v, card || null, lane);
+  if (card) {
+    const [x, y] = R.place(v, card, lane);
+    const by = who === "fly" ? "" : ` — ${who.replace("coach:", "coach: ").replace("_", " ")}`;
+    if (sim.play(1, card, x, y)) { did = `${card} (${ROLE_LABEL[sim.db.cards[card].role] || sim.db.cards[card].role}), ${lane ? "right" : "left"} lane${by}`; addLog(1, card, x); }
+  } else if (who === "veto") did = "Wait (coach: spell has nothing to hit)";
+  else if (who === "save") did = "Wait (coach: saving for the win condition)";
   if (R.autoAbility(sim, 1)) addLog(1, "ability");
   renderFly(r, f, mask, did);
 }

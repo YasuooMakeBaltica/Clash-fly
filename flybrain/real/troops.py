@@ -204,13 +204,17 @@ def _floats(state: dict) -> dict:
 class TroopDetector:
     """Drop-in for perception.BadgeDetector: ``detect(img, layout) -> list[SeenUnit]`` with troop types."""
 
-    def __init__(self, weights: str | Path, threshold: float = 0.35, device: str = "cpu", types: str | Path | None = None):
-        """``types``: close-up type classifier weights (default: troop_types.pt next to ``weights`` if present)."""
+    def __init__(self, weights: str | Path, threshold: float | None = None, device: str = "cpu",
+                 types: str | Path | None = None):
+        """``threshold``: heatmap peak needed to report a troop (default: the one tuned on validation frames,
+        stored with the weights). ``types``: close-up type classifier weights (default: troop_types.pt next
+        to ``weights`` if present)."""
         ckpt = torch.load(weights, map_location=device, weights_only=False)
         self.classes = ckpt["classes"]
         self.net = TroopNet(len(self.classes), ckpt.get("width", 32)).to(device).eval()
         self.net.load_state_dict(_floats(ckpt["model"]))
-        self.threshold, self.device = threshold, device
+        self.threshold = threshold if threshold is not None else ckpt.get("threshold", 0.35)
+        self.device = device
         self.ground = ckpt.get("ground", 0.0)       # extra shift (tiles) from the predicted point to the feet
         types = Path(types) if types else Path(weights).with_name("troop_types.pt")
         self.typer = None

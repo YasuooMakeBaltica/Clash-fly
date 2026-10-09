@@ -179,7 +179,8 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    press Save. `--no-auto-deck` turns the automatic update off.
 5. **Calibrate** (start a Training Camp or friendly battle first):
 
-   In PowerShell (the default Windows terminal):
+   In PowerShell (the default Windows terminal). `--adb` is optional: the
+   bot looks for LDPlayer's adb.exe in the usual folders by itself.
 
    ```powershell
    $ADB = "C:\LDPlayer\LDPlayer9\adb.exe"

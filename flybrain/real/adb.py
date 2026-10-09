@@ -7,24 +7,58 @@ first instance is usually ``emulator-5554`` (or ``127.0.0.1:5555``); run
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 
+LDPLAYER_DIRS = ["LDPlayer\\LDPlayer9", "LDPlayer\\LDPlayer4.0", "LDPlayer9", "LDPlayer4.0", "LDPlayer",
+                 "Program Files\\LDPlayer\\LDPlayer9", "Program Files\\ldplayer9box", "XuanZhi\\LDPlayer9"]
+
+
+def find_adb(adb_path: str = "adb") -> str:
+    """The given adb if it exists, else LDPlayer's adb from the usual install folders, else adb on PATH."""
+    p = adb_path.strip().strip('"').strip("'")
+    if p and p != "adb" and Path(p).is_file():
+        return p
+    if p and p != "adb" and not p.startswith(("%", "$")):
+        raise FileNotFoundError(f"adb not found at {p}. Find adb.exe in your LDPlayer folder and pass its path.")
+    for drive in ("C:\\", "D:\\", "E:\\"):
+        for d in LDPLAYER_DIRS:
+            cand = Path(drive) / d / "adb.exe"
+            if cand.is_file():
+                return str(cand)
+    found = shutil.which("adb")
+    if found:
+        return found
+    raise FileNotFoundError("couldn't find adb. Pass --adb with the full path to adb.exe in your LDPlayer folder "
+                            "(right-click the LDPlayer shortcut > Open file location).")
+
+
 class Adb:
     def __init__(self, adb_path: str = "adb", serial: str | None = None, timeout: float = 10.0):
-        self.adb_path, self.serial, self.timeout = adb_path, serial, timeout
+        self.adb_path, self.serial, self.timeout = find_adb(adb_path), serial, timeout
 
     def _cmd(self, *args: str) -> list[str]:
         base = [self.adb_path] + (["-s", self.serial] if self.serial else [])
         return base + list(args)
 
     def run(self, *args: str) -> bytes:
-        return subprocess.run(self._cmd(*args), capture_output=True, check=True, timeout=self.timeout).stdout
+        try:
+            return subprocess.run(self._cmd(*args), capture_output=True, check=True, timeout=self.timeout).stdout
+        except subprocess.CalledProcessError as e:
+            msg = (e.stderr or b"").decode(errors="replace").strip()
+            if "more than one" in msg:
+                msg += f"\n-> pick one with --serial (from: {', '.join(self.devices())})"
+            elif "no devices" in msg or "not found" in msg:
+                msg += "\n-> is LDPlayer running with ADB debugging set to 'open local connection'?"
+            raise RuntimeError(f"adb {' '.join(args)} failed: {msg}") from None
 
     def connect(self, host: str) -> str:
         return subprocess.run([self.adb_path, "connect", host], capture_output=True, text=True,

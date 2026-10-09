@@ -140,19 +140,39 @@ the replay viewer.
 `flybrain/real/` reads the LDPlayer screen and plays through adb, with the
 full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
 
-1. **Screenshots and taps** via adb (`adb.py`).
-2. **Screen reading** (`perception.py`): elixir from the pink bar, your hand
-   by matching each slot against the official card art of all 109 cards
-   (`cards.py`, downloaded once from RoyaleAPI's assets; greyed-out cards
-   work too), tower HP from the HP bars
-   (tracked over time, destroyed towers detected), troops from their
-   red/blue level badges. Troop *types* are not recognised yet.
+1. **Screenshots and taps** via adb (`adb.py`, finds LDPlayer's adb by itself).
+2. **Screen reading** (`perception.py`), calibrated on a real LDPlayer 540×960
+   battle screenshot:
+   - elixir from the pink bar;
+   - your hand by matching each slot against the official card art of all
+     109 cards (`cards.py`, downloaded once from RoyaleAPI's assets;
+     greyed-out cards work too), and your 8-card deck learned from the hand;
+   - tower HP from the HP bars (tracked over time, destroyed towers detected);
+   - **troops with their type** (`troops.py`): a small CNN finds every troop,
+     its side and what it is (96 troop types), trained on about 7,000 real
+     labelled battle frames (see below). Without its weights the bot falls
+     back to looking for red/blue level badges (positions only).
 3. **Same inputs as in training** (`state.py`): the screen is turned back
-   into a full-game simulator state, so the brain gets the 89 situation
-   channels it learned on; the card for its chosen role and the drop spot
-   come from the same helpers as in the simulator.
-4. **Decision and tap** (`bot.py`) once per second; champions' ability
-   button is tapped when enemies come at you.
+   into a full-game simulator state (real troop types, so air/ground, tanks
+   and building targeters are known), so the brain gets the 89 situation
+   channels it learned on. The opponent's elixir is counted from the troops
+   they deploy (`tracking.py`).
+4. **Decision** (`bot.py`) once per second: the fly brain picks a card role
+   and lane, and the **coach guard** (`envs/royale/guard.py`) steps in where
+   the brain is weak. It defends and finishes towers, takes good chances the
+   brain lets pass, cancels spells with nothing to hit, and saves elixir for
+   your win condition. `--no-guard` plays with the pure brain. Champions'
+   ability button is tapped when enemies come at you.
+
+### Troop detector training
+
+`python scripts/train_troops.py --data <dataset>/images/part2` trains the
+detector (and `scripts/train_troop_types.py` the close-up type classifier)
+on KataCR's [Clash-Royale-Detection-Dataset](https://github.com/wty-yy/Clash-Royale-Detection-Dataset)
+(MIT licence, see THIRD_PARTY_NOTICES.md): 568×896 arena crops of real
+matches with every troop labelled. Whole recording sessions are held out to
+measure accuracy on matches the net never saw. The dataset frames are
+aligned to the LDPlayer screen by image registration (`troops.FRAME_ARENA`).
 
 ### Setup on Windows
 

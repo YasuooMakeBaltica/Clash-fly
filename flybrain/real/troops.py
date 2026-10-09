@@ -124,6 +124,36 @@ class TroopNet(nn.Module):
         return self.heat(f), self.cls(f), self.off(f)
 
 
+class TypeNet(nn.Module):
+    """Troop type from a full-resolution close-up: (B, 3, 64, 64) in 0..1 -> (B, K) logits.
+
+    The close-up is a CROP x CROP dataset-frame-pixel window centred on the troop's
+    point, so small troops keep the detail the half-size detector input loses."""
+
+    CROP = 96
+
+    def __init__(self, n_classes: int = len(CLASSES), width: int = 32):
+        super().__init__()
+        w = width
+        self.body = nn.Sequential(_cbr(3, w, 2), _Res(w), _cbr(w, 2 * w, 2), _Res(2 * w), _cbr(2 * w, 4 * w, 2),
+                                  _Res(4 * w), _Res(4 * w))
+        self.fc = nn.Linear(4 * w, n_classes)
+
+    def forward(self, x):
+        f = self.body(x - 0.5)
+        return self.fc(f.mean((2, 3)))
+
+
+def frame_crops(frame: np.ndarray, points, crop: int = TypeNet.CROP, out: int = 64) -> np.ndarray:
+    """Close-ups (N, out, out, 3) of a 568x896 frame around points [(u, v)] (black outside the frame)."""
+    res = np.zeros((len(points), out, out, 3), np.uint8)
+    for i, (u, v) in enumerate(points):
+        m = np.array([[crop / out, 0, u - crop / 2], [0, crop / out, v - crop / 2]], np.float32)
+        res[i] = cv2.warpAffine(frame, m, (out, out), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_AREA,
+                                borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    return res
+
+
 # ----------------------------------------------------------------- geometry
 def frame_box(lay: Layout, w: int, h: int) -> tuple[float, float, float, float]:
     """Pixel box (x0, y0, x1, y1) of the screenshot that corresponds to a 568x896 dataset frame."""

@@ -6,9 +6,9 @@
        python -m flybrain.real.calibrate check --image shot.png
 3. If boxes are off, drag them yourself (opens a window per region; Enter to confirm):
        python -m flybrain.real.calibrate pick --image shot.png
-4. Save card pictures: name the 4 cards in your hand, left to right (and the next card):
+4. Usually not needed: cards are recognised from the official card art. Only if
+   `check` shows "?" for a card, save its picture from your screen (4 hand cards, left to right):
        python -m flybrain.real.calibrate templates --image shot.png --cards "Knight,Archers,Giant,Musketeer" --next Goblins
-   Repeat with other screenshots until every card in your deck has a picture in templates/cards/.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from ..envs.royale.decks import resolve
 from ..envs.royale.sim import LANE_X, WIDTH
 from .adb import Adb
 from .bot import draw_overlay
+from .cards import OFFICIAL_DIR, download_official
 from .layout import Box, Layout
 from .perception import Perception
 
@@ -38,7 +39,10 @@ def cmd_screenshot(a):
 def cmd_check(a):
     img = cv2.imread(a.image)
     lay = Layout.load(a.layout)
-    obs = Perception(lay, a.templates).read(img)
+    if not any(OFFICIAL_DIR.glob("*.png")):
+        print("downloading the official card pictures (once)...")
+        download_official()
+    obs = Perception(lay, a.templates, official_dir=OFFICIAL_DIR).read(img)
     out = Path(a.image).with_name(Path(a.image).stem + "_check.png")
     cv2.imwrite(str(out), draw_overlay(img, lay, obs))
     print(f"elixir {obs.elixir}  hand {obs.hand}  next {obs.next_card}")

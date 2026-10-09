@@ -11,8 +11,12 @@ and placed by the same helpers as in the simulator -> adb taps the card and
 the spot. Start a battle yourself (or leave the bot running between
 battles); it waits while no battle is on screen.
 
-Put the 8 cards of your in-game battle deck in decks/fly.txt (or pass
---deck), and save a picture of each with ``calibrate templates``.
+The bot recognises the cards in your hand from the official card art
+(downloaded once to templates/official/) and works out your 8-card deck as
+the cards cycle during a battle. When it has seen all 8 it writes them to
+decks/fly.txt, so changing decks in the game needs no setup (--no-auto-deck
+turns this off). Card pictures saved with ``calibrate templates`` still take
+priority if the official art doesn't match your screen.
 
 Supercell's terms of service prohibit automation. Use an alt account.
 """
@@ -34,9 +38,11 @@ from ..envs.royale.decks import load_deck
 from ..envs.royale.env import features, pick_card, role_mask
 from ..envs.royale.strategy import View, place
 from .adb import Adb
+from .cards import OFFICIAL_DIR, DeckTracker, download_official, fill_deck
 from .layout import Layout
 from .perception import Perception, in_battle
 from .state import build_sim
+from ..deck_editor import write_deck
 
 warnings.filterwarnings("ignore", message="Sparse")
 ROOT = Path(__file__).resolve().parents[2]
@@ -104,17 +110,41 @@ def tower_score(towers: dict) -> tuple[float, float, int, int]:
 class Bot:
     """One decision per call to :meth:`step`; ``adb`` does the tapping (None = dry run)."""
 
-    def __init__(self, agent, perception: Perception, layout: Layout, deck: list[str], adb=None, learn: bool = False):
-        self.agent, self.per, self.lay, self.deck, self.adb, self.learn = agent, perception, layout, deck, adb, learn
+    def __init__(self, agent, perception: Perception, layout: Layout, deck: list[str], adb=None, learn: bool = False,
+                 auto_deck: bool = True):
+        self.agent, self.per, self.lay, self.adb, self.learn = agent, perception, layout, adb, learn
         self.db = load()
-        self.champion = next((n for n in deck if self.db.cards[n].champion), None)
+        self.tracker = DeckTracker() if auto_deck else None
+        self.set_deck(deck)
         self.battle_start = None
         self.prev_score = None
         self.played = 0
         self.champion_played_at = None
         self.last_ability = -1e9
 
+    def set_deck(self, deck: list[str]) -> None:
+        self.deck = list(deck)
+        self.champion = next((n for n in self.deck if self.db.cards[n].champion), None)
+        self.per.hand_reader.deck_hint = self.deck
+
+    def learned_deck(self) -> list[str] | None:
+        """All 8 cards seen this battle (None until then)."""
+        return self.tracker.complete() if self.tracker else None
+
+    def _battle_deck(self, obs) -> list[str]:
+        """The deck file, unless the hand shows cards that aren't in it (then: what's been seen so far)."""
+        if self.tracker is None:
+            return self.deck
+        learned = self.tracker.complete()
+        if learned:
+            return learned
+        if all(n in self.deck for n in obs.hand + [obs.next_card] if n):
+            return self.deck
+        return fill_deck(self.tracker.known(), [n for n in obs.hand if n])
+
     def start_battle(self, now: float) -> None:
+        if self.tracker is not None:
+            self.tracker = DeckTracker(self.tracker.min_sightings)
         self.battle_start, self.prev_score, self.played = now, None, 0
         self.champion_played_at, self.last_ability = None, -1e9
         self.per.reset()
@@ -145,7 +175,13 @@ class Bot:
     def step(self, img: np.ndarray, now: float) -> dict:
         h, w = img.shape[:2]
         obs = self.per.read(img)
-        sim = build_sim(obs, now - self.battle_start, self.deck, db=self.db)
+        if self.tracker is not None:
+            self.tracker.update(obs.hand, obs.next_card)
+        deck = self._battle_deck(obs)
+        champion = next((n for n in deck if self.db.cards[n].champion), None)
+        if champion != self.champion and champion is not None:
+            self.champion, self.champion_played_at = champion, None
+        sim = build_sim(obs, now - self.battle_start, deck, db=self.db)
         view = View(sim, 0)
         mask = role_mask(view)
         a = self.agent.act(features(view)[None], [mask[None], np.ones((1, 2), bool)], learn=self.learn)[0]
@@ -185,7 +221,9 @@ def main():
     ap.add_argument("--brain", default=str(ROOT / "models/fly_royale.pt"))
     ap.add_argument("--deck", default=str(ROOT / "decks/fly.txt"), help="your in-game battle deck (8 cards)")
     ap.add_argument("--layout", default="layout.json", help="from 'calibrate pick' (defaults are estimates)")
-    ap.add_argument("--templates", default="templates/cards", help="card pictures from 'calibrate templates'")
+    ap.add_argument("--templates", default="templates/cards", help="card pictures from 'calibrate templates' (optional)")
+    ap.add_argument("--official", default=str(OFFICIAL_DIR), help="official card art (downloaded on first run)")
+    ap.add_argument("--no-auto-deck", action="store_true", help="don't learn the deck from the hand; use --deck only")
     ap.add_argument("--dry-run", action="store_true", help="read the screen and decide, but never tap")
     ap.add_argument("--learn", action="store_true", help="keep learning from tower damage during real matches")
     ap.add_argument("--save", default="models/fly_live.pt", help="where --learn saves the brain after each match")
@@ -200,19 +238,26 @@ def main():
     lay = Layout.load(args.layout)
     if not Path(args.layout).exists():
         print(f"warning: {args.layout} not found, using estimated screen positions. Run calibrate first.")
-    per = Perception(lay, args.templates)
+    if not Path(args.official).exists() or len(list(Path(args.official).glob("*.png"))) < len(load().pool()):
+        print("downloading the official card pictures (once)...")
+        failed = download_official(args.official)
+        if failed:
+            print(f"warning: couldn't download {len(failed)} card pictures ({failed[:5]}...); check your internet")
+    per = Perception(lay, args.templates, official_dir=args.official)
     deck = load_deck(args.deck)
     deck_mtime = Path(args.deck).stat().st_mtime
-    print("deck:", deck)
-    missing = [n for n in deck if n not in per.matcher.templates]
+    print("deck:", deck, "" if args.no_auto_deck else "(updates itself from what's in your hand)")
+    missing = [n for n in deck if n not in per.matcher.templates and n not in per.hand_reader.official.names] \
+        if per.hand_reader.official else [n for n in deck if n not in per.matcher.templates]
     if missing:
-        print(f"warning: no card pictures for {missing}; the bot can't see those cards. Run calibrate templates.")
+        print(f"warning: no card pictures for {missing}; the bot can't see those cards.")
     agent, brain_args = load_brain(args.brain)
     print(f"brain {args.brain}: decision {brain_args.get('decision_ms')} ms, {agent.net.kc.stop - agent.net.kc.start} KCs")
     debug = Path(args.debug_dir)
     debug.mkdir(parents=True, exist_ok=True)
 
-    bot = Bot(agent, per, lay, deck, adb=None if args.dry_run else adb, learn=args.learn)
+    bot = Bot(agent, per, lay, deck, adb=None if args.dry_run else adb, learn=args.learn,
+              auto_deck=not args.no_auto_deck)
     last_seen, matches = 0.0, 0
     try:
         while True:
@@ -223,6 +268,15 @@ def main():
                     length = last_seen - bot.battle_start
                     c_me, c_foe, result = bot.end_battle()
                     print(f"battle over after {length:.0f}s: crowns {c_me}-{c_foe} ({result}), {bot.played} cards played")
+                    learned = bot.learned_deck()
+                    if learned and sorted(learned) != sorted(bot.deck):
+                        try:
+                            write_deck(Path(args.deck).parent, Path(args.deck).stem, learned)
+                            bot.set_deck(learned)
+                            deck_mtime = Path(args.deck).stat().st_mtime
+                            print(f"learned your deck from the hand, saved to {args.deck}: {learned}")
+                        except ValueError as e:
+                            print(f"saw a deck that doesn't check out, not saving it: {e}")
                     if args.learn:
                         Path(args.save).parent.mkdir(parents=True, exist_ok=True)
                         torch.save(dict(agent=agent.state_dict(), args=brain_args), args.save)
@@ -235,13 +289,9 @@ def main():
             if bot.battle_start is None:
                 if Path(args.deck).stat().st_mtime != deck_mtime:      # edited with the deck editor
                     try:
-                        bot.deck = load_deck(args.deck)
-                        bot.champion = next((n for n in bot.deck if bot.db.cards[n].champion), None)
+                        bot.set_deck(load_deck(args.deck))
                         deck_mtime = Path(args.deck).stat().st_mtime
                         print("deck changed:", bot.deck)
-                        missing = [n for n in bot.deck if n not in per.matcher.templates]
-                        if missing:
-                            print(f"warning: no card pictures for {missing}. Run calibrate templates.")
                     except ValueError as e:
                         print(f"deck file has a problem, keeping the old deck: {e}")
                 bot.start_battle(t0)

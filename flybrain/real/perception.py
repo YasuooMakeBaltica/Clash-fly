@@ -1,8 +1,10 @@
 """Read the game state from a Clash Royale screenshot (BGR numpy image).
 
 * elixir: share of the elixir bar that is pink.
-* hand: template matching of each card slot against card pictures saved
-  with ``calibrate templates`` (templates/cards/<Card name>.png).
+* hand: each card slot is matched against card pictures you saved with
+  ``calibrate templates`` (templates/cards/<Card name>.png) if any, otherwise
+  against the official card art (templates/official/, see cards.py), so any
+  of the 109 cards is recognised without setup.
 * towers: share of each HP bar that is filled with the owner's colour
   (blue = you, red = enemy), tracked over time so a bar that disappears
   after being nearly empty counts as destroyed.
@@ -89,9 +91,26 @@ class CardMatcher:
         return (best, score) if score >= self.threshold else (None, score)
 
 
-def read_hand(img: np.ndarray, lay: Layout, matcher: CardMatcher) -> tuple[list[str | None], str | None]:
-    hand = [matcher.match(b.crop(img))[0] for b in lay.hand_slots]
-    nxt = matcher.match(lay.next_slot.crop(img))[0]
+class HandReader:
+    """Your own card pictures first; then the official art (all cards, then only the deck's cards if unsure)."""
+
+    def __init__(self, matcher: CardMatcher, official=None):
+        self.matcher, self.official = matcher, official
+        self.deck_hint: list[str] | None = None
+
+    def match(self, crop: np.ndarray) -> str | None:
+        name = self.matcher.match(crop)[0]
+        if name is None and self.official is not None:
+            name = self.official.match(crop)[0]
+            if name is None and self.deck_hint:
+                name = self.official.match(crop, self.deck_hint)[0]
+        return name
+
+
+def read_hand(img: np.ndarray, lay: Layout, matcher) -> tuple[list[str | None], str | None]:
+    match = matcher.match if isinstance(matcher, HandReader) else (lambda c: matcher.match(c)[0])
+    hand = [match(b.crop(img)) for b in lay.hand_slots]
+    nxt = match(lay.next_slot.crop(img))
     return hand, nxt
 
 
@@ -206,9 +225,14 @@ class Observation:
 
 
 class Perception:
-    def __init__(self, layout: Layout, template_dir: str | Path = "templates/cards", detector=None):
+    def __init__(self, layout: Layout, template_dir: str | Path = "templates/cards", detector=None,
+                 official_dir: str | Path | None = None):
+        from .cards import OfficialMatcher
+
         self.layout = layout
         self.matcher = CardMatcher(template_dir)
+        official = OfficialMatcher.from_dir(official_dir) if official_dir else None
+        self.hand_reader = HandReader(self.matcher, official if official and official.names else None)
         self.detector = detector or BadgeDetector()
         self.towers = TowerTracker()
 
@@ -217,5 +241,5 @@ class Perception:
 
     def read(self, img: np.ndarray) -> Observation:
         lay = self.layout
-        hand, nxt = read_hand(img, lay, self.matcher)
+        hand, nxt = read_hand(img, lay, self.hand_reader)
         return Observation(read_elixir(img, lay), hand, nxt, self.towers.update(img, lay), self.detector.detect(img, lay))

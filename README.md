@@ -142,7 +142,9 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
 
 1. **Screenshots and taps** via adb (`adb.py`).
 2. **Screen reading** (`perception.py`): elixir from the pink bar, your hand
-   by matching card pictures you save once, tower HP from the HP bars
+   by matching each slot against the official card art of all 109 cards
+   (`cards.py`, downloaded once from RoyaleAPI's assets; greyed-out cards
+   work too), tower HP from the HP bars
    (tracked over time, destroyed towers detected), troops from their
    red/blue level badges. Troop *types* are not recognised yet.
 3. **Same inputs as in training** (`state.py`): the screen is turned back
@@ -168,12 +170,13 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    (mobile/portrait). Settings → Other settings → **ADB debugging: open
    local connection**. Restart LDPlayer. Finish the Clash Royale tutorial by
    hand on your alt account.
-4. **Your deck**: double-click `edit_deck.bat` (or run
-   `python -m flybrain.deck_editor`). A page opens in your browser: tap the
-   8 cards of your in-game battle deck and press Save. It writes
-   `decks/fly.txt` (you can also edit that file by hand). Change it whenever
-   you change decks in the game; a running bot picks up the new deck at the
-   next battle.
+4. **Your deck updates itself**: the bot recognises every card in your
+   hand and works out your 8-card deck as the cards cycle. Once it has seen
+   all 8 it uses them, and after the battle it saves them to
+   `decks/fly.txt`. So just change decks in the game. If you want to set it
+   by hand anyway (e.g. before the first battle), double-click
+   `edit_deck.bat` (or `python -m flybrain.deck_editor`), tap 8 cards and
+   press Save. `--no-auto-deck` turns the automatic update off.
 5. **Calibrate** (start a Training Camp or friendly battle first):
 
    ```bat
@@ -185,14 +188,13 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
 
    Open `shot_check.png`. If the boxes don't sit on the arena, elixir bar,
    cards and tower HP bars, run `python -m flybrain.real.calibrate pick
-   --image shot.png` and drag them. Then save a picture of each card:
+   --image shot.png` and drag them. The card names in the hand boxes should
+   be right; only if one shows `?`, save its picture from your screen
+   (the 4 hand cards left to right, then the small next card):
 
    ```bat
    python -m flybrain.real.calibrate templates --image shot.png --cards "Hog Rider,Musketeer,Cannon,Ice Golem" --next "Skeletons"
    ```
-
-   (the 4 hand cards left to right, then the small next card). Take more
-   screenshots and repeat until all 8 deck cards are saved.
 6. **Run**:
 
    ```bat

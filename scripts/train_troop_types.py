@@ -2,7 +2,10 @@
 
 Same data as scripts/train_troops.py (KataCR's MIT-licensed dataset). Each
 labelled troop gives one close-up around its point; whole recording sessions
-are held out for validation. Besides exact type accuracy it reports how
+are held out for validation. With --sprites (the dataset's images/segment
+folder: cut-out troop sprites with transparency) half of every training batch
+is synthetic: a sprite of an evenly drawn troop type pasted onto a random
+patch of a real arena, which covers troop types the real frames rarely show. Besides exact type accuracy it reports how
 often the properties the coach cares about are right (flying, targets
 buildings only, tank, ranged).
 
@@ -54,6 +57,51 @@ def extract(files, labels, cache):
     return x, y, s
 
 
+def load_sprites(folder):
+    """{class index: [BGRA sprite]} from images/segment/<dataset class>/<class>_<side>_<id>.png."""
+    from flybrain.real.troops import kata_class
+    out = {}
+    for d in sorted(Path(folder).iterdir()):
+        char = kata_class(d.name)
+        if not d.is_dir() or not char:
+            continue
+        imgs = [cv2.imread(str(f), cv2.IMREAD_UNCHANGED) for f in sorted(d.glob("*.png"))]
+        imgs = [im for im in imgs if im is not None and im.ndim == 3 and im.shape[2] == 4]
+        if imgs:
+            out.setdefault(CLASSES.index(char), []).extend(imgs)
+    return out
+
+
+def synthetic(sprites, backgrounds, n, rng):
+    """n close-ups (out x out) with a pasted sprite at the troop point, and their labels."""
+    out = int(64 * PAD)
+    win = int(TypeNet.CROP * PAD)
+    keys = sorted(sprites)
+    xs, ys = np.zeros((n, out, out, 3), np.uint8), np.zeros(n, np.int64)
+    for i in range(n):
+        k = keys[rng.integers(len(keys))]
+        spr = sprites[k][rng.integers(len(sprites[k]))]
+        if rng.random() < 0.5:
+            spr = spr[:, ::-1]
+        sc = rng.uniform(0.9, 1.1)
+        spr = cv2.resize(spr, (max(2, int(spr.shape[1] * sc)), max(2, int(spr.shape[0] * sc))))
+        bg = backgrounds[rng.integers(len(backgrounds))]
+        H, W = bg.shape[:2]
+        cx, cy = rng.integers(win // 2, W - win // 2), rng.integers(win // 2, H - win // 2)
+        patch = bg[cy - win // 2:cy + win // 2, cx - win // 2:cx + win // 2].astype(np.float32).copy()
+        h, w = spr.shape[:2]
+        # the troop point (bbox centre x, 70% down) sits at the window centre, like real close-ups
+        x0, y0 = win // 2 - w // 2, int(win // 2 - 0.7 * h)
+        xa, ya, xb, yb = max(0, x0), max(0, y0), min(win, x0 + w), min(win, y0 + h)
+        if xb > xa and yb > ya:
+            s_ = spr[ya - y0:yb - y0, xa - x0:xb - x0].astype(np.float32)
+            a = s_[:, :, 3:4] / 255.0
+            patch[ya:yb, xa:xb] = patch[ya:yb, xa:xb] * (1 - a) + s_[:, :, :3] * a
+        xs[i] = cv2.resize(patch.astype(np.uint8), (out, out), interpolation=cv2.INTER_AREA)
+        ys[i] = k
+    return xs, ys
+
+
 def properties():
     db = load()
     props = []
@@ -76,6 +124,8 @@ def main():
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--cache", default="runs/troop_crops.npz")
+    ap.add_argument("--sprites", help="the dataset's images/segment folder (synthetic close-ups of every troop type)")
+    ap.add_argument("--all", action="store_true", help="also train on the validation sessions (final model)")
     ap.add_argument("--out", default=str(ROOT / "models/troop_types.pt"))
     args = ap.parse_args()
     if args.threads:
@@ -91,6 +141,16 @@ def main():
     val_sessions = set(args.val.split(","))
     va = np.array([s in val_sessions for s in sess])
     tr_idx, va_idx = np.flatnonzero(~va), np.flatnonzero(va)
+    if args.all:
+        tr_idx = np.arange(len(y))
+    sprites, backgrounds = {}, []
+    if args.sprites:
+        sprites = load_sprites(args.sprites)
+        train_files = [f for f in files if Path(f).parts[-3] not in val_sessions or args.all]
+        for f in rng.choice(train_files, min(150, len(train_files)), replace=False):
+            backgrounds.append(cv2.imread(str(f)))
+        print(f"sprites for {len(sprites)} troop types ({sum(len(v) for v in sprites.values())} sprites), "
+              f"{len(backgrounds)} backgrounds", flush=True)
     counts = np.bincount(y[tr_idx], minlength=len(CLASSES))
     print(f"{len(y)} troop close-ups: {len(tr_idx)} train, {len(va_idx)} validation; "
           f"{(counts > 0).sum()} of {len(CLASSES)} types seen in training", flush=True)
@@ -110,13 +170,17 @@ def main():
         tot, n = 0.0, 0
         for s in range(0, len(perm), args.batch):
             b = perm[s:s + args.batch]
+            xr, yr = x[b], y[b]
+            if sprites:
+                xs_, ys_ = synthetic(sprites, backgrounds, len(b), rng)
+                xr, yr = np.concatenate([xr, xs_]), np.concatenate([yr, ys_])
             ox, oy = rng.integers(0, out - 64 + 1, 2)
-            xb = x[b, oy:oy + 64, ox:ox + 64].astype(np.float32)
+            xb = xr[:, oy:oy + 64, ox:ox + 64].astype(np.float32)
             if rng.random() < 0.5:
                 xb = xb[:, :, ::-1]
             xb = np.clip(xb * rng.uniform(0.75, 1.25) + rng.uniform(-25, 25), 0, 255).astype(np.uint8)
             logits = net(batch_tensor(xb))
-            loss = F.cross_entropy(logits, torch.from_numpy(y[b]), weight=weight, label_smoothing=0.05)
+            loss = F.cross_entropy(logits, torch.from_numpy(yr), weight=weight, label_smoothing=0.05)
             opt.zero_grad()
             loss.backward()
             opt.step()

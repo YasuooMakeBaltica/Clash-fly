@@ -5,3 +5,6 @@ runs/
 data/
 *.npz
 *.pt
+!models/*.pt
+layout.json
+templates/

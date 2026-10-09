@@ -72,7 +72,7 @@ population comes out empty or wrong, check the column values against
 | 2 | Spiking sim shows sensible firing | `python scripts/test_sim.py` |
 | 3–4 | Catch-the-ball + dopamine plasticity | `python scripts/train_catch.py` |
 | 5 | Clash Royale simulator + coaching | `python scripts/train_clash.py` |
-| 6 | Clash Royale perception (LDPlayer) | not started; needs a local session |
+| 6 | Real game: read the screen, play through adb | `python -m flybrain.real.bot` (calibrate first) |
 
 `train_catch.py` writes `runs/catch/learning_curve.{csv,png}` and
 `weights.pt`. Useful flags: `--device cuda`, `--batch 64` (parallel games),
@@ -111,6 +111,49 @@ and which lane. Placement inside the lane uses the same helper as the coach.
 (positions, elixir, the brain's votes and what the coach would have done) for
 the replay viewer.
 
+## Playing the real game (LDPlayer)
+
+`flybrain/real/` reads the LDPlayer screen and plays through adb:
+
+1. **Screenshots and taps** via adb (`adb.py`). LDPlayer ships its own adb
+   (e.g. `C:\LDPlayer\LDPlayer9\adb.exe`); enable ADB in LDPlayer's
+   settings and set the resolution to 540×960 (portrait).
+2. **Screen reading** (`perception.py`): elixir from the pink bar, your hand
+   by matching card pictures, tower HP from the HP bars (tracked over time,
+   destroyed towers detected), troops from their red/blue level badges.
+   Troop *types* are not recognised yet; that needs a trained detector.
+3. **Same inputs as in training** (`state.py`): what's on screen is turned
+   back into a simulator state, so the trained brain gets the exact 62
+   situation channels it learned on, and cards are placed with the same lane
+   helper.
+4. **Decision and tap** (`bot.py`) once per second: tap the card slot, then
+   the drop spot.
+
+The deck must be the training deck: Knight, Archers, Giant, Musketeer,
+Mini P.E.K.K.A, Goblins, Fireball, Arrows. The trained brain is in
+`models/fly_v2.pt`.
+
+**Setup on your PC** (screen positions in the code are estimates until you
+calibrate):
+
+```bash
+pip install -r requirements-real.txt
+set ADB="C:\LDPlayer\LDPlayer9\adb.exe"
+# in a battle:
+python -m flybrain.real.calibrate screenshot --adb %ADB% --out shot.png
+python -m flybrain.real.calibrate check --image shot.png      # look at shot_check.png
+python -m flybrain.real.calibrate pick --image shot.png       # drag boxes if they're off
+python -m flybrain.real.calibrate templates --image shot.png --cards "Knight,Archers,Giant,Musketeer" --next Goblins
+#   ...repeat templates with other screenshots until all 8 cards are saved
+python -m flybrain.real.bot --adb %ADB% --dry-run             # reads + decides, no taps
+python -m flybrain.real.bot --adb %ADB%                       # plays
+python -m flybrain.real.bot --adb %ADB% --learn               # keeps learning from tower damage
+```
+
+The bot saves annotated screenshots to `runs/real/` every 5 s so you can see
+what it read. Supercell's terms of service prohibit automation: use an alt
+account.
+
 ## Layout
 
 ```
@@ -121,6 +164,9 @@ flybrain/
   agent.py        state -> PN encoding, MBON-group voting, reward -> DANs
   envs/catch.py   batched catch-the-ball
   envs/clash/     Clash Royale simulator, coach and bots, brain environment
+  real/           real game: adb, screen reading, calibration, bot loop
+web/              browser game (Beat the Fly): JS port of the sim and brain
+models/           trained brains
 scripts/          milestone scripts
 tests/
 ```

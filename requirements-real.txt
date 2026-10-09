@@ -1,0 +1,3 @@
+# Extra packages for playing the real game (on your PC, with LDPlayer)
+-r requirements.txt
+opencv-python>=4.8   # screen reading + calibration windows (use opencv-python-headless on servers)

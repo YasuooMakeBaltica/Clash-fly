@@ -22,6 +22,38 @@ LDPLAYER_DIRS = ["LDPlayer\\LDPlayer9", "LDPlayer\\LDPlayer4.0", "LDPlayer9", "L
                  "Program Files\\LDPlayer\\LDPlayer9", "Program Files\\ldplayer9box", "XuanZhi\\LDPlayer9"]
 
 
+def _ldplayer_dirs() -> list[Path]:
+    """Folders where LDPlayer may be: the running emulator, the registry, then common install folders."""
+    out: list[Path] = []
+    if os.name != "nt":
+        return out
+    try:                                                    # the running LDPlayer window's program folder
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "(Get-Process dnplayer,ldplayer,LdVBoxHeadless -ErrorAction SilentlyContinue).Path"],
+                           capture_output=True, text=True, timeout=15)
+        out += [Path(ln.strip()).parent for ln in r.stdout.splitlines() if ln.strip()]
+    except Exception:
+        pass
+    try:
+        import winreg
+
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for key in ("Software\\XuanZhi\\LDPlayer9", "Software\\XuanZhi\\LDPlayer", "Software\\Changzhi\\LDPlayer",
+                        "Software\\WOW6432Node\\XuanZhi\\LDPlayer9"):
+                for value in ("InstallDir", "InstallPath"):
+                    try:
+                        with winreg.OpenKey(hive, key) as k:
+                            out.append(Path(winreg.QueryValueEx(k, value)[0]))
+                    except OSError:
+                        pass
+    except ImportError:
+        pass
+    roots = [Path(f"{d}:\\") for d in "CDEFG"]
+    roots += [Path(os.environ[v]) for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA") if v in os.environ]
+    out += [r / d for r in roots for d in LDPLAYER_DIRS]
+    return out
+
+
 def find_adb(adb_path: str = "adb") -> str:
     """The given adb if it exists, else LDPlayer's adb from the usual install folders, else adb on PATH."""
     p = adb_path.strip().strip('"').strip("'")
@@ -29,16 +61,15 @@ def find_adb(adb_path: str = "adb") -> str:
         return p
     if p and p != "adb" and not p.startswith(("%", "$")):
         raise FileNotFoundError(f"adb not found at {p}. Find adb.exe in your LDPlayer folder and pass its path.")
-    for drive in ("C:\\", "D:\\", "E:\\"):
-        for d in LDPLAYER_DIRS:
-            cand = Path(drive) / d / "adb.exe"
-            if cand.is_file():
-                return str(cand)
+    for d in _ldplayer_dirs():
+        cand = d / "adb.exe"
+        if cand.is_file():
+            return str(cand)
     found = shutil.which("adb")
     if found:
         return found
-    raise FileNotFoundError("couldn't find adb. Pass --adb with the full path to adb.exe in your LDPlayer folder "
-                            "(right-click the LDPlayer shortcut > Open file location).")
+    raise FileNotFoundError("couldn't find adb. Keep LDPlayer open and try again, or pass --adb with the full path to "
+                            "adb.exe in your LDPlayer folder (right-click the LDPlayer shortcut > Open file location).")
 
 
 class Adb:

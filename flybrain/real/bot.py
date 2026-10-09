@@ -43,6 +43,7 @@ from .cards import OFFICIAL_DIR, DeckTracker, download_official, fill_deck
 from .layout import Layout
 from .perception import BadgeDetector, Perception, default_detector, in_battle
 from .state import build_sim
+from .tracking import EnemyElixir
 from ..deck_editor import write_deck
 
 warnings.filterwarnings("ignore", message="Sparse")
@@ -129,6 +130,7 @@ class Bot:
         self.db = load()
         self.tracker = DeckTracker() if auto_deck else None
         self.leak_at: float | None = 9.5
+        self.enemy_elixir: EnemyElixir | None = None
         self.guard = guard
         self.coach = Coach()
         self.set_deck(deck)
@@ -162,6 +164,7 @@ class Bot:
         if self.tracker is not None:
             self.tracker = DeckTracker(self.tracker.min_sightings)
         self.battle_start, self.prev_score, self.played = now, None, 0
+        self.enemy_elixir = EnemyElixir(self.db)
         self.champion_played_at, self.last_ability = None, -1e9
         self.per.reset()
         self.agent.begin_episode(1)
@@ -197,7 +200,10 @@ class Bot:
         champion = next((n for n in deck if self.db.cards[n].champion), None)
         if champion != self.champion and champion is not None:
             self.champion, self.champion_played_at = champion, None
-        sim = build_sim(obs, now - self.battle_start, deck, db=self.db)
+        typed = any(u.char for u in obs.units if u.owner == 1)
+        est = self.enemy_elixir.update(obs.units, now - self.battle_start) if self.enemy_elixir else None
+        sim = build_sim(obs, now - self.battle_start, deck, db=self.db,
+                        enemy_elixir=est if typed or self.enemy_elixir.plays else None)
         view = View(sim, 0)
         heads = tuple(getattr(self.agent, "heads", HEADS))
         # Full elixir: waiting would waste it, so the brain must pick a card.

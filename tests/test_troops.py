@@ -71,4 +71,5 @@ def test_state_rebuild_uses_troop_types():
     enemy = [u for u in sim.units if u.owner == 1 and not u.tower]
     names = sorted(u.spec.name for u in enemy)
     assert names == ["HogRider", "Minion"]
+    assert sorted(u.card for u in enemy) == ["Hog Rider", "Minions"]
     assert any(u.flying for u in enemy)

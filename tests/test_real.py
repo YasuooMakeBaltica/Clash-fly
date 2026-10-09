@@ -146,3 +146,17 @@ def test_battle_log_lines_are_json(tmp_path):
     lines = [json.loads(ln) for ln in (tmp_path / "log.jsonl").read_text().splitlines()]
     assert len(lines) == 2 and lines[0]["t"] == 12.3 and lines[0]["who"] == "coach:defend"
     assert lines[0]["units"] == [[1, 4.0, 20.0, "HogRider"]] and lines[0]["towers"]["foe_king"] == 0.9
+
+
+def test_raw_screencap_decoding():
+    import struct
+
+    from flybrain.real.adb import decode_raw
+
+    img = np.zeros((4, 3, 4), np.uint8)
+    img[..., 0], img[..., 3] = 200, 255                     # red in RGBA
+    for header in (struct.pack("<3I", 3, 4, 1), struct.pack("<4I", 3, 4, 1, 1)):
+        out = decode_raw(header + img.tobytes())
+        assert out.shape == (4, 3, 3) and (out[..., 2] == 200).all() and (out[..., 0] == 0).all()
+    with pytest.raises(ValueError):
+        decode_raw(b"\x89PNG\r\n\x1a\n" + bytes(40))         # a PNG is not raw

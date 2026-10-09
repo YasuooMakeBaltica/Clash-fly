@@ -77,6 +77,22 @@ def find_adb(adb_path: str = "adb") -> str:
                             "adb.exe in your LDPlayer folder (right-click the LDPlayer shortcut > Open file location).")
 
 
+def decode_raw(data: bytes) -> np.ndarray:
+    """``adb exec-out screencap`` without -p: a 12- or 16-byte header (width, height, format
+    [, colour space], little-endian uint32) followed by RGBA pixels. Returns BGR."""
+    if len(data) < 16:
+        raise ValueError("raw screencap too short")
+    w, h, fmt = np.frombuffer(data[:12], "<u4")
+    if not (0 < w < 10000 and 0 < h < 10000) or fmt != 1:          # 1 = RGBA_8888
+        raise ValueError(f"unexpected raw screencap header {w}x{h} format {fmt}")
+    n = int(w) * int(h) * 4
+    header = len(data) - n
+    if header not in (12, 16):
+        raise ValueError(f"raw screencap size {len(data)} doesn't match {w}x{h}")
+    rgba = np.frombuffer(data[header:], np.uint8).reshape(int(h), int(w), 4)
+    return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+
+
 class Adb:
     def __init__(self, adb_path: str = "adb", serial: str | None = None, timeout: float = 10.0):
         self.adb_path, self.serial, self.timeout = find_adb(adb_path), serial, timeout
@@ -140,8 +156,22 @@ class Adb:
         w, h = map(int, m[-1])
         return w, h
 
+    raw_ok: bool | None = None       # raw screenshots work on this device (decided on first use)
+
     def screencap(self) -> np.ndarray:
-        """Current screen as a BGR image."""
+        """Current screen as a BGR image.
+
+        Raw pixels when the device supports it (no PNG compression on the emulator, noticeably
+        faster), else PNG."""
+        if self.raw_ok is not False:
+            try:
+                img = decode_raw(self.run("exec-out", "screencap"))
+                self.raw_ok = True
+                return img
+            except (ValueError, RuntimeError):
+                if self.raw_ok:            # worked before: a real failure, not an unsupported format
+                    raise
+                self.raw_ok = False
         png = self.run("exec-out", "screencap", "-p")
         img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
         if img is None:

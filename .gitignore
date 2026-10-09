@@ -8,3 +8,6 @@ data/
 !models/*.pt
 layout.json
 templates/
+
+# card data source
+!flybrain/envs/royale/data/cards.json

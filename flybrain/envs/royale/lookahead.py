@@ -31,7 +31,8 @@ LOOK_DEFAULTS = dict(
     crown=10.0,         # extra elixir worth of a destroyed tower
     danger=1.0,         # weight of enemy troops already on our side
     own=1.0,            # worth of our troops on the field relative to elixir in hand
-    offense=1.0,        # weight of damage to enemy towers (the copy's opponent doesn't defend)
+    offense=0.25,       # weight of damage to enemy towers: the copy's opponent doesn't defend, so troops
+                        # sent over the bridge look free (0.25 vs 1.0: +0.48 vs +0.47 against the rule coach)
     wait_margin=0.0,    # a card must beat waiting by this much elixir to be played
     trades=0.0,         # 1: also play spell trades out against waiting
 )
@@ -91,15 +92,16 @@ def char_value(spec, db) -> float:
     return min(3.0, (spec.hp + spec.shield) / 600.0)
 
 
-def position_value(sim: Sim, me: int, tower_hp: float = 150.0, crown: float = 10.0, danger: float = 1.0,
-                   own: float = 1.0, offense: float = 1.0, **_) -> float:
-    """How good the match looks for ``me``, in elixir."""
+def position_value(sim: Sim, me: int, **weights) -> float:
+    """How good the match looks for ``me``, in elixir (``weights``: LOOK_DEFAULTS entries to change)."""
+    w = {**LOOK_DEFAULTS, **weights}
+    own, danger = w["own"], w["danger"]
     v = sim.players[me].elixir
     for t in sim.towers():
-        s = 1 if t.owner == me else -offense
-        v += s * (max(t.hp, 0.0) if t.alive else 0.0) / tower_hp
+        s = 1 if t.owner == me else -w["offense"]
+        v += s * (max(t.hp, 0.0) if t.alive else 0.0) / w["tower_hp"]
         if not t.alive or t.hp <= 0:
-            v -= s * crown
+            v -= s * w["crown"]
     for u in sim.units:
         if u.tower or not u.alive or u.timed or u.spec is None:
             continue

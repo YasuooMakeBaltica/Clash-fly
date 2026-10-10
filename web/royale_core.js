@@ -1007,7 +1007,7 @@ const RoyaleCore = (() => {
 
   // ------------------------------------------------------------- lookahead.py
   // The coach tries its defensive options in copies of the match before choosing (see lookahead.py).
-  const LOOK = { horizon: 8, tower_hp: 150, crown: 10, danger: 1, own: 1, offense: 1, wait_margin: 0, trades: 0 };
+  const LOOK = { horizon: 8, tower_hp: 150, crown: 10, danger: 1, own: 1, offense: 0.25, wait_margin: 0, trades: 0 };
   let dbObjects = null;
   function cloneSim(sim, seed) {
     if (!dbObjects || dbObjects.db !== sim.db) {          // everything reachable from the card data is shared

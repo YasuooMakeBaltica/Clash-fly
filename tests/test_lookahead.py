@@ -33,14 +33,15 @@ def test_clone_is_independent_and_shares_card_data():
 
 def test_position_values():
     sim = Sim((DECK, FOE), seed=1)
-    assert position_value(sim, 0) == pytest.approx(5.0)                  # even start: just the elixir
-    assert position_value(sim, 1) == pytest.approx(5.0)
+    even = dict(offense=1.0)                                            # both sides' towers count fully
+    assert position_value(sim, 0, **even) == pytest.approx(5.0)         # even start: just the elixir
+    assert position_value(sim, 1, **even) == pytest.approx(5.0)
     assert char_value(DB.characters["HogRider"], DB) == 4.0
     assert char_value(DB.characters["Skeleton"], DB) == pytest.approx(1 / 3)
     assert 5.0 < char_value(DB.characters["GoblinGiant"], DB) < 6.0   # most of the card, riders the rest
     assert 1.0 < char_value(DB.characters["Golemite"], DB) < 3.0       # a death spawn, by hit points
     sim.units.append(Unit(sim, DB.characters["HogRider"], 1, 3.5, 10.0, card="Hog Rider", deploy=0.0))
-    assert position_value(sim, 0) == pytest.approx(1.0)                 # an enemy Hog Rider costs 4
+    assert position_value(sim, 0, **even) == pytest.approx(1.0)         # an enemy Hog Rider costs 4
 
 
 def test_defends_a_hog_rider_better_than_waiting():
@@ -62,9 +63,9 @@ def test_waits_when_the_tower_handles_it():
     sim = Sim((DECK, FOE), seed=3)
     sim.players[0].elixir = 7.0
     sim.units.append(Unit(sim, DB.characters["Skeleton"], 1, 3.5, 13.0, card="Skeletons", deploy=0.0))
-    # with tower damage on the enemy side discounted (the copy's opponent never defends, so a troop
-    # sent over the bridge looks free), nothing beats letting the tower shoot one Skeleton
-    card, _, reason = Lookahead(offense=0.25).plan(View(sim, 0))
+    # tower damage on the enemy side counts for little (the copy's opponent never defends, so a troop
+    # sent over the bridge looks free): nothing beats letting the tower shoot one Skeleton
+    card, _, reason = Lookahead().plan(View(sim, 0))
     assert card is None and reason == "hold"
 
 

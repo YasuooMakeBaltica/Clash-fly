@@ -101,6 +101,17 @@ it to `flybrain/envs/royale/data/cards.json` at tournament level 11).
   decks so the brain learns every card.
 * **Training**: `python scripts/train_royale.py` records the coach playing
   with many decks, teaches its choices to the brain, then tests it.
+  `--split` gives the brain separate "play now?", role and lane outputs;
+  `--init <brain> --dagger-rounds N` continues training on the brain's own
+  games, labelled by the coach (DAgger). `scripts/compare_brains.py` plays
+  brains on identical matches, pure and with the coach guard.
+* **Coach** (`strategy.py`): its settings live in `COACH_DEFAULTS` and
+  `PLACE_DEFAULTS`. Test a change with `scripts/duel_coaches.py`, which plays
+  every random deck pairing twice with the coaches swapped, so deck and seat
+  luck cancel and only the strategy difference shows (identical coaches
+  score exactly 0). Tuned this way: defensive buildings 6 tiles from the
+  river, spells only for trades worth 1.5 elixir more than they cost,
+  elixir held until 9.8 (+5 to +6 points per game against the earlier coach).
 
 ## Clash Royale (simulated, starter deck)
 
@@ -230,8 +241,11 @@ aligned to the LDPlayer screen by image registration (`troops.FRAME_ARENA`).
    python -m flybrain.real.bot --adb $ADB --learn       # keeps learning from tower damage
    ```
 
-   Start battles yourself; the bot waits between them. It saves annotated
-   screenshots to `runs/real/` every 5 s so you can see what it read.
+   Start battles yourself; the bot waits between them. Each battle gets a
+   folder in `runs/real/` with an annotated screenshot every 5 s and
+   `log.jsonl`: one line per decision with what it saw (hand, elixir,
+   towers, troops with types, the opponent's estimated elixir), what it
+   played and who chose it (the fly, or the coach and why).
 
 Supercell's terms of service prohibit automation: use an alt account.
 
@@ -246,10 +260,10 @@ flybrain/
   envs/catch.py   batched catch-the-ball
   envs/clash/     first simulator (starter deck only); used by the browser game
   envs/royale/    full simulator: card database, roles, decks, coach, brain environment
-  real/           real game: adb, screen reading, calibration, bot loop
+  real/           real game: adb, screen reading, troop detector, elixir counting, bot loop
 decks/fly.txt     the fly brain's deck (edit me)
 web/              browser game (Beat the Fly): JS port of the sim and brain
-models/           trained brains
+models/           trained brains, troop detector and type classifier
 scripts/          milestone scripts
 tests/
 ```

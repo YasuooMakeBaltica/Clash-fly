@@ -134,20 +134,63 @@ def augment(img, rng):
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
-def batches(idx, cache, labels, bs, rng, train):
+def load_sprites(folder):
+    """[(BGRA sprite at frame scale, side, class index)] from the dataset's images/segment/<class>/<class>_<side>_<id>.png."""
+    out = []
+    for d in sorted(Path(folder).iterdir()):
+        char = kata_class(d.name)
+        if not d.is_dir() or not char:
+            continue
+        for f in sorted(d.glob("*.png")):
+            im = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+            parts = f.stem.split("_")
+            if im is None or im.ndim != 3 or im.shape[2] != 4 or len(parts) < 3 or parts[-2] not in ("0", "1"):
+                continue
+            out.append((im, int(parts[-2]), CLASSES.index(char)))
+    return out
+
+
+def paste_sprites(img, sprites, rng, n):
+    """Paste n random troop sprites onto a net-input image (frame at SCALE); returns the image and their labels."""
+    img = img.astype(np.float32).copy()
+    objs = []
+    for _ in range(n):
+        spr, side, k = sprites[rng.integers(len(sprites))]
+        if rng.random() < 0.5:
+            spr = spr[:, ::-1]
+        sc = SCALE * rng.uniform(0.9, 1.1)
+        h, w = max(2, int(spr.shape[0] * sc)), max(2, int(spr.shape[1] * sc))
+        spr = cv2.resize(spr, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32)
+        x0 = int(rng.uniform(20, FRAME_SIZE[0] * SCALE - 20 - w))
+        y0 = int(rng.uniform(60 * SCALE, (FRAME_SIZE[1] - 60) * SCALE - h))
+        if x0 < 0 or y0 < 0:
+            continue
+        a = spr[:, :, 3:4] / 255.0
+        img[y0:y0 + h, x0:x0 + w] = img[y0:y0 + h, x0:x0 + w] * (1 - a) + spr[:, :, :3] * a
+        # labels are in full-size frame pixels, like the dataset's
+        u, v = body_point(x0 / SCALE, y0 / SCALE, (x0 + w) / SCALE, (y0 + h) / SCALE)
+        objs.append((side, u, v, w / SCALE, h / SCALE, k))
+    return img.astype(np.uint8), objs
+
+
+def batches(idx, cache, labels, bs, rng, train, sprites=None, paste=0.0):
     order = rng.permutation(idx) if train else idx
     for s in range(0, len(order), bs):
         b = order[s:s + bs]
         imgs, ts = [], []
         for i in b:
             img = np.asarray(cache[i])
+            objs = labels[i]
+            if train and sprites and rng.random() < paste:      # extra synthetic troops (rare types, more examples)
+                img, extra = paste_sprites(img, sprites, rng, int(rng.integers(1, 4)))
+                objs = list(objs) + extra
             flip = bool(train and rng.random() < 0.5)
             if flip:
                 img = img[:, ::-1]
             if train:
                 img = augment(img, rng)
             imgs.append(img)
-            ts.append(targets(labels[i], flip))
+            ts.append(targets(objs, flip))
         x = torch.from_numpy(np.ascontiguousarray(np.stack(imgs)[..., ::-1])).permute(0, 3, 1, 2).float() / 255.0
         yield b, x, [torch.from_numpy(np.stack(t)) for t in zip(*ts)]
 
@@ -202,6 +245,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="use only this many training frames (quick tests)")
     ap.add_argument("--cache", default="runs/troops_cache.u8")
     ap.add_argument("--init", help="continue from these weights")
+    ap.add_argument("--sprites", help="the dataset's images/segment folder: paste synthetic troops into training frames")
+    ap.add_argument("--paste", type=float, default=0.5, help="share of training frames that get 1-3 pasted troops")
     ap.add_argument("--out", default=str(ROOT / "models/troops.pt"))
     args = ap.parse_args()
     if args.threads:
@@ -224,6 +269,9 @@ def main():
     Path(args.cache).parent.mkdir(parents=True, exist_ok=True)
     cache = build_cache(files, args.cache)
 
+    sprites = load_sprites(args.sprites) if args.sprites else None
+    if sprites:
+        print(f"{len(sprites)} troop sprites for pasting into {args.paste:.0%} of training frames", flush=True)
     net = TroopNet(len(CLASSES), args.width)
     if args.init:
         net.load_state_dict({k: v.float() if v.is_floating_point() else v
@@ -236,7 +284,7 @@ def main():
     for ep in range(args.epochs):
         tot = np.zeros(3)
         n = 0
-        for _, x, (heat, cls, off, mask) in batches(train, cache, labels, args.batch, rng, True):
+        for _, x, (heat, cls, off, mask) in batches(train, cache, labels, args.batch, rng, True, sprites, args.paste):
             ph, pc, po = net(x)
             l_heat = focal_loss(ph, heat)
             l_cls = F.cross_entropy(pc, cls, ignore_index=-1) if (cls >= 0).any() else ph.sum() * 0

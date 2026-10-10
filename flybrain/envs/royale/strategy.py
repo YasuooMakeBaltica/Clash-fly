@@ -273,6 +273,7 @@ COACH_DEFAULTS = dict(
     punish_below=2.5,      # opponent elixir at or below this: attack with the win condition
     leak_single=9.8,       # play something at this elixir (single elixir) ...
     leak_double=6.5,       # ... and at this elixir in double elixir
+    punish_commit=None,    # opponent has this much elixir of troops in one lane: attack the other lane (None = off)
 )
 
 
@@ -364,6 +365,11 @@ class Coach:
         back = view.enemy_back_tank()
         if wins and back is not None:
             return wins[0], 1 - back, "punish"
+        if wins and self.p["punish_commit"] is not None and view.elixir >= db.cards[wins[0]].elixir:
+            for lane in (0, 1):
+                committed = sum(card_value(u) for u in view.enemies() if lane_of(u.x) == lane and not u.building)
+                if committed >= self.p["punish_commit"] and not view.threats(1 - lane):
+                    return wins[0], 1 - lane, "punish"
         if wins and view.enemy_elixir() <= self.p["punish_below"] and view.elixir >= db.cards[wins[0]].elixir:
             return wins[0], view.weak_lane(), "punish"
 

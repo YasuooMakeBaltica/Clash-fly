@@ -104,18 +104,20 @@ def test_full_simulator_matches(tmp_path):
         np.testing.assert_allclose(p["place_any"], j["place_any"], atol=1e-9)
 
 
-def test_royale_brain_matches(tmp_path):
+@pytest.mark.parametrize("split", [False, True])
+def test_royale_brain_matches(tmp_path, split):
     sys.path.insert(0, str(ROOT / "scripts"))
     from export_brain_js import export
 
     from flybrain.agent import AgentConfig, FlyAgent
     from flybrain.connectome import synthetic
-    from flybrain.envs.royale.env import HEADS, N_CHANNELS
+    from flybrain.envs.royale.env import HEADS, N_CHANNELS, SPLIT_HEADS
 
+    heads = SPLIT_HEADS if split else HEADS
     conn = synthetic(n_pn=200, n_kc=500, n_mbon=60, n_dan=20, n_glomeruli=100, seed=3)
     rng = np.random.default_rng(0)
     probe = (rng.random((16, N_CHANNELS)) < 0.15).astype(np.float32)
-    agent = FlyAgent(conn, N_CHANNELS, HEADS, cfg=AgentConfig(action_groups="random", seed=0), probe=probe)
+    agent = FlyAgent(conn, N_CHANNELS, heads, cfg=AgentConfig(action_groups="random", seed=0), probe=probe)
     agent.net.W_kc_mbon.mul_(torch.rand_like(agent.net.W_kc_mbon) * 1.5)
     agent.net.cfg.noise = 0.0
     agent.cfg.mbon_noise = 0.0
@@ -124,5 +126,5 @@ def test_royale_brain_matches(tmp_path):
     feats = (rng.random((5, N_CHANNELS)) < 0.15).astype(np.float32)
     js = run_node(tmp_path, dict(SCENARIO, snapshot_ticks=[], brain_features=feats.tolist()), brain)["votes"]
     agent.act(feats, learn=False)
-    for h in range(2):
+    for h in range(len(heads)):
         np.testing.assert_allclose(agent.last["votes"][h].numpy(), [v[h] for v in js], atol=2e-3)

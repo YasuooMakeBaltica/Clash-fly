@@ -40,6 +40,9 @@ if (process.argv[3]) {
   const d = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
   d.noise = 0; d.mbon_noise = 0;
   const brain = new ClashCore.Brain(d);
-  for (const f of sc.brain_features) { const r = brain.decide(Float32Array.from(f), new Array(16).fill(true)); out.votes.push([r.cardVotes, r.laneVotes]); }
+  for (const f of sc.brain_features) {
+    const r = brain.decide(Float32Array.from(f), new Array(16).fill(true));
+    out.votes.push(r.playVotes ? [r.playVotes, r.cardVotes, r.laneVotes] : [r.cardVotes, r.laneVotes]);
+  }
 }
 console.log(JSON.stringify(out));

@@ -5,7 +5,7 @@ import pytest
 from flybrain.envs.royale.db import load
 from flybrain.envs.royale.lookahead import Lookahead, char_value, clone, position_value, rollout
 from flybrain.envs.royale.sim import Sim, Unit
-from flybrain.envs.royale.strategy import View
+from flybrain.envs.royale.strategy import Coach, View
 
 DB = load()
 DECK = ["Knight", "Archers", "Cannon", "Fireball", "Zap", "Hog Rider", "Skeletons", "Musketeer"]
@@ -82,3 +82,22 @@ def test_spots_stay_off_our_towers():
     for name in ("Knight", "Cannon"):
         for x, y in spots(View(sim, 0), name, 0):
             assert not (2.0 < x < 5.0 and 5.0 < y < 8.0)
+
+
+def test_spell_trades_are_played_out_first():
+    d0 = ["Hog Rider", "Arrows", "Fireball", "Knight", "Musketeer", "Cannon", "Skeletons", "Ice Spirit"]
+    d1 = ["Minion Horde", "Barbarians", "Giant", "Witch", "Zap", "Rocket", "Bats", "Tombstone"]
+
+    def match(minions_at):
+        sim = Sim((d0, d1), seed=1, shuffle_updates=False)
+        me = sim.players[0]
+        me.hand, me.queue, me.elixir = d0[:4], d0[4:], 10.0
+        sim._deploy(0, DB.cards["Musketeer"], 4.0, 6.0)
+        sim._deploy(1, DB.cards["Minion Horde"], *minions_at)
+        for _ in range(15):
+            sim.step()
+        return View(sim, 0)
+
+    assert Lookahead().plan(match((4.0, 25.0)))[:3] == ("Arrows", 0, "trade")   # 6 Minions in one spot: cast
+    rule, look = Coach().plan(match((9.0, 22.0))), Lookahead().plan(match((9.0, 22.0)))
+    assert rule[2] == "trade" and look[2] != "trade"           # the Musketeer and tower handle them: keep the Arrows

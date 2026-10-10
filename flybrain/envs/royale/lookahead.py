@@ -8,7 +8,9 @@ scored in elixir: tower health (``tower_hp`` hit points per elixir, plus
 ``crown`` for a destroyed tower), the troops left standing on both sides (each
 worth its share of its card's cost, scaled by remaining health) and elixir in
 hand. Waiting keeps elixir; a defence that loses its troops or lets the tower
-get hit scores lower.
+get hit scores lower. A spell the rules want to cast for a good trade is played
+out against waiting the same way, and kept if waiting comes out ahead (the
+coach then plans as if that spell weren't in hand).
 
 In the real game the copy is the state rebuilt from the screen
 (``flybrain.real.state.build_sim``), so this works there too: about 20 short
@@ -34,7 +36,8 @@ LOOK_DEFAULTS = dict(
     offense=0.25,       # weight of damage to enemy towers: the copy's opponent doesn't defend, so troops
                         # sent over the bridge look free (0.25 vs 1.0: +0.48 vs +0.47 against the rule coach)
     wait_margin=0.0,    # a card must beat waiting by this much elixir to be played
-    trades=0.0,         # 1: also play spell trades out against waiting
+    trades=1.0,         # 1: also play spell trades out against waiting
+                        # (+0.12 ± 0.04 per game against the lookahead without it)
 )
 
 _MEMO: dict = {}

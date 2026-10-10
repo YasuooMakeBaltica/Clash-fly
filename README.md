@@ -116,8 +116,9 @@ it to `flybrain/envs/royale/data/cards.json` at tournament level 11).
   card in hand that could help at a few spots, and waiting, each in a copy of
   the match played 8 seconds ahead, and keeps the option that leaves the best
   position (tower health, troops left standing on both sides by elixir worth,
-  elixir in hand). It beats the rule-only coach by +0.43 to +0.47 per game
-  in duplicate format (about 71% wins to 28% losses). The real bot and the
+  elixir in hand). It beats the rule-only coach by +0.43 to +0.48 per game
+  in duplicate format (about 71% wins to 28% losses). Spell trades are played
+  out against waiting too (+0.12 more). The real bot and the
   browser game use it; `--no-lookahead` turns it off in the real bot, and
   `duel_coaches.py --a look` tests it.
 

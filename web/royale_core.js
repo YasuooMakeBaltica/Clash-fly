@@ -1007,7 +1007,7 @@ const RoyaleCore = (() => {
 
   // ------------------------------------------------------------- lookahead.py
   // The coach tries its defensive options in copies of the match before choosing (see lookahead.py).
-  const LOOK = { horizon: 8, tower_hp: 150, crown: 10, danger: 1, own: 1, offense: 0.25, wait_margin: 0, trades: 0 };
+  const LOOK = { horizon: 8, tower_hp: 150, crown: 10, danger: 1, own: 1, offense: 0.25, wait_margin: 0, trades: 1 };
   let dbObjects = null;
   function cloneSim(sim, seed) {
     if (!dbObjects || dbObjects.db !== sim.db) {          // everything reachable from the card data is shared
@@ -1109,6 +1109,19 @@ const RoyaleCore = (() => {
     plan(view) {
       let [card, lane, reason] = Coach.plan.call(this, view);
       this.spot = null; this.tried = new Set();
+      const seed = (Math.round(view.sim.time * 10) * 7919 + view.sim._uid) >>> 0;
+      if (reason === "trade" && LOOK.trades) {        // cast only if that beats waiting; else plan without it
+        const [x, y] = place(view, card, lane);
+        const cast = rollout(view.sim, view.me, [card, x, y], LOOK.horizon, seed), wait = rollout(view.sim, view.me, null, LOOK.horizon, seed);
+        this.rollouts += 2;
+        if (cast === null || positionValue(cast, view.me) <= positionValue(wait, view.me)) {
+          const without = Object.create(view);
+          without._without = new Set([...(view._without || []), card]);
+          without.playable = function () { return View.prototype.playable.call(this).filter((n) => !this._without.has(n)); };
+          return this.plan(without);
+        }
+        return [card, lane, reason];
+      }
       if (!this.reasons.has(reason)) return [card, lane, reason];
       const play = view.playable();
       let cands;
@@ -1119,7 +1132,6 @@ const RoyaleCore = (() => {
       const options = [[null, null]];
       for (const n of cands) for (const xy of spots(view, n, lane)) options.push([n, xy]);
       let best = null, bestV = -Infinity;
-      const seed = (Math.round(view.sim.time * 10) * 7919 + view.sim._uid) >>> 0;
       for (const [n, xy] of options) {
         const r = rollout(view.sim, view.me, n === null ? null : [n, xy[0], xy[1]], LOOK.horizon, seed);
         this.rollouts++;

@@ -44,14 +44,14 @@ SCENARIO = dict(
 )
 
 
-def run_python():
-    sim = Sim((DECK0, DECK1), seed=1, shuffle_updates=False)
-    for p, h, q in zip(sim.players, SCENARIO["hands"], SCENARIO["queues"]):
+def run_python(sc=SCENARIO):
+    sim = Sim(tuple(sc["decks"]), seed=1, shuffle_updates=False)
+    for p, h, q in zip(sim.players, sc["hands"], sc["queues"]):
         p.hand, p.queue, p.elixir = list(h), list(q), 10
     sim.tower(1, "princess", 0).hp -= 1
-    ev = list(SCENARIO["events"])
+    ev = list(sc["events"])
     tick, snaps = 0, []
-    for at in SCENARIO["snapshot_ticks"]:
+    for at in sc["snapshot_ticks"]:
         while tick < at:
             while ev and ev[0][0] == tick:
                 _, kind, player, name, x, y = ev.pop(0)
@@ -75,12 +75,22 @@ def run_python():
             plan=[list(Coach().plan(v)) for v in views],
             guard=[[[list(guard(v, c, ln)) for ln in (0, 1)] for c in [None] + [pick_card(v, r) for r in ROLES]]
                    for v in views],
-            place_any=[[[list(place(v, n, ln)) for ln in (0, 1)] for n in SCENARIO["place_cards"]] for v in views],
+            place_any=[[[list(place(v, n, ln)) for ln in (0, 1)] for n in sc.get("place_cards", [])] for v in views],
             value=[position_value(sim, p) for p in (0, 1)],
             rollout=[position_value(rollout(sim, p, None, 3.0), p) for p in (0, 1)],
             look=[look_plan(v) for v in views],
         ))
     return snaps
+
+
+TRADE_D0 = ["Hog Rider", "Arrows", "Fireball", "Knight", "Musketeer", "Cannon", "Skeletons", "Ice Spirit"]
+TRADE_D1 = ["Minion Horde", "Barbarians", "Giant", "Witch", "Zap", "Rocket", "Bats", "Tombstone"]
+TRADE_SCENARIO = dict(
+    decks=[TRADE_D0, TRADE_D1], hands=[TRADE_D0[:4], TRADE_D1[:4]], queues=[TRADE_D0[4:], TRADE_D1[4:]],
+    events=[[0, "deploy", 0, "Musketeer", 4.0, 6.0], [0, "deploy", 1, "Minion Horde", 9.0, 22.0],
+            [0, "deploy", 1, "Barbarians", 14.0, 27.0]],
+    snapshot_ticks=[5, 15, 30],
+)
 
 
 def look_plan(view):
@@ -122,6 +132,16 @@ def test_full_simulator_matches(tmp_path):
             if spot is not None:
                 assert spot[0] == jspot[0]
                 np.testing.assert_allclose(spot[1], jspot[1], atol=1e-9)
+
+
+def test_lookahead_trades_match(tmp_path):
+    py = run_python(TRADE_SCENARIO)
+    js = run_node(tmp_path, TRADE_SCENARIO)["snapshots"]
+    assert any(p["plan"][0][2] == "trade" for p in py)                  # the rule coach wants to cast
+    assert any(p["look"][0][0][2] != "trade" for p in py)               # ... and the lookahead declines once
+    for p, j in zip(py, js):                       # player 0 (the other side's lane picks break ties at random)
+        assert p["plan"][0] == j["plan"][0]
+        assert p["look"][0][0] == j["look"][0][0]
 
 
 @pytest.mark.parametrize("split", [False, True])

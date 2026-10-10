@@ -279,10 +279,17 @@ COACH_DEFAULTS = dict(
 
 class Coach:
     name = "coach"
+    spot = None        # (card, (x, y)) when plan() also chose where its card goes (lookahead.py)
 
     def __init__(self, placer=None, **params):
         self.placer = placer or place          # where cards go (strategy.place unless overridden)
         self.p = {**COACH_DEFAULTS, **params}
+
+    def where(self, view: View, card: str, lane: int) -> tuple[float, float]:
+        """Where to drop ``card``: the spot the last plan() chose for it, else the placer's."""
+        if self.spot is not None and self.spot[0] == card:
+            return self.spot[1]
+        return self.placer(view, card, lane)
 
     def card_fit(self, view: View, name: str, prof: dict) -> bool:
         c = view.db.cards[name]
@@ -390,7 +397,7 @@ class Coach:
         card, lane = self.suggest(view)
         if card is None:
             return None
-        return Move(card, lane, *self.placer(view, card, lane))
+        return Move(card, lane, *self.where(view, card, lane))
 
 
 def auto_ability(sim: Sim, player: int) -> bool:

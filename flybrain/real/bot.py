@@ -24,6 +24,7 @@ Supercell's terms of service prohibit automation. Use an alt account.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -38,13 +39,14 @@ from ..envs.royale.db import ROLES, load
 from ..envs.royale.decks import load_deck
 from ..envs.royale.env import HEADS, brain_masks, decode, features, pick_card
 from ..envs.royale.guard import guarded_action
+from ..envs.royale.lookahead import Lookahead, off_towers
 from ..envs.royale.strategy import Coach, View, place
 from .adb import Adb
 from .cards import OFFICIAL_DIR, DeckTracker, download_official, fill_deck
 from .layout import Layout
 from .perception import BadgeDetector, Perception, default_detector, in_battle
 from .state import build_sim
-from .tracking import EnemyElixir
+from .tracking import EnemyElixir, OwnDeploys
 from ..deck_editor import write_deck
 
 warnings.filterwarnings("ignore", message="Sparse")
@@ -139,14 +141,15 @@ class Bot:
     """One decision per call to :meth:`step`; ``adb`` does the tapping (None = dry run)."""
 
     def __init__(self, agent, perception: Perception, layout: Layout, deck: list[str], adb=None, learn: bool = False,
-                 auto_deck: bool = True, guard: bool = True):
+                 auto_deck: bool = True, guard: bool = True, lookahead: bool = True):
         self.agent, self.per, self.lay, self.adb, self.learn = agent, perception, layout, adb, learn
         self.db = load()
         self.tracker = DeckTracker() if auto_deck else None
         self.leak_at: float | None = 9.5
         self.enemy_elixir: EnemyElixir | None = None
+        self.own: OwnDeploys | None = None
         self.guard = guard
-        self.coach = Coach()
+        self.coach = Lookahead() if lookahead else Coach()
         self.set_deck(deck)
         self.battle_start = None
         self.prev_score = None
@@ -179,6 +182,7 @@ class Bot:
             self.tracker = DeckTracker(self.tracker.min_sightings)
         self.battle_start, self.prev_score, self.played = now, None, 0
         self.enemy_elixir = EnemyElixir(self.db)
+        self.own = OwnDeploys(self.db)
         self.champion_played_at, self.last_ability = None, -1e9
         self.per.reset()
         self.agent.begin_episode(1)
@@ -216,7 +220,9 @@ class Bot:
             self.champion, self.champion_played_at = champion, None
         typed = any(u.char for u in obs.units if u.owner == 1)
         est = self.enemy_elixir.update(obs.units, now - self.battle_start) if self.enemy_elixir else None
-        sim = build_sim(obs, now - self.battle_start, deck, db=self.db,
+        # troops we just played that the detector doesn't show yet (deploy animation): keep them in the state
+        units = self.own.fill(obs.units, obs.hand, now) if self.own else obs.units
+        sim = build_sim(dataclasses.replace(obs, units=units), now - self.battle_start, deck, db=self.db,
                         enemy_elixir=est if typed or self.enemy_elixir.plays else None)
         view = View(sim, 0)
         heads = tuple(getattr(self.agent, "heads", HEADS))
@@ -241,7 +247,9 @@ class Bot:
             card = pick_card(view, ROLES[role_i - 1]) if role_i > 0 else None
         if card is not None and card in obs.hand:
             role = self.db.cards[card].role
-            x, y = place(view, card, lane)
+            x, y = self.coach.where(view, card, lane) if self.guard else place(view, card, lane)
+            if self.db.cards[card].type != "spell":
+                x, y = off_towers(view.sim, 0, x, y)      # the game refuses troops dropped on a tower
             cx, cy = self.lay.hand_slots[obs.hand.index(card)].center()
             who = "" if out["who"] == "fly" else f" [{out['who']}]"
             out.update(card=card, role=role, lane=lane, slot_xy=(int(cx * w), int(cy * h)),
@@ -250,10 +258,14 @@ class Bot:
             if self.adb is not None:
                 self.adb.play_card(out["slot_xy"], out["target_xy"])
                 self.played += 1
+                if self.own is not None:
+                    self.own.add(card, x, y, now)
                 if card == self.champion:
                     self.champion_played_at = now
         elif out["who"] == "veto":
             out["action"] = "wait (spell vetoed: nothing worth hitting)"
+        elif out["who"] == "hold":
+            out["action"] = "wait (coach: waiting defends better here)"
         if out["card"] is None and self._maybe_ability(view, now, w, h):
             out["action"] = "champion ability"
         return out
@@ -271,6 +283,8 @@ def main():
     ap.add_argument("--official", default=str(OFFICIAL_DIR), help="official card art (downloaded on first run)")
     ap.add_argument("--troops", default=str(ROOT / "models/troops.pt"), help="trained troop detector weights")
     ap.add_argument("--no-guard", action="store_true", help="pure fly brain: no coach rules on top of its moves")
+    ap.add_argument("--no-lookahead", action="store_true",
+                    help="the guard's coach defends by its rules alone, without simulating its options first")
     ap.add_argument("--no-auto-deck", action="store_true", help="don't learn the deck from the hand; use --deck only")
     ap.add_argument("--dry-run", action="store_true", help="read the screen and decide, but never tap")
     ap.add_argument("--learn", action="store_true", help="keep learning from tower damage during real matches")
@@ -308,7 +322,7 @@ def main():
     debug.mkdir(parents=True, exist_ok=True)
 
     bot = Bot(agent, per, lay, deck, adb=None if args.dry_run else adb, learn=args.learn,
-              auto_deck=not args.no_auto_deck, guard=not args.no_guard)
+              auto_deck=not args.no_auto_deck, guard=not args.no_guard, lookahead=not args.no_lookahead)
     last_seen, matches = 0.0, 0
     try:
         while True:

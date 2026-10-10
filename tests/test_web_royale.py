@@ -14,6 +14,7 @@ from flybrain.envs.royale.db import ROLES, load
 from flybrain.envs.royale.env import features, pick_card, role_mask
 from flybrain.envs.royale.sim import Sim
 from flybrain.envs.royale.guard import guard
+from flybrain.envs.royale.lookahead import LOOK_DEFAULTS, Lookahead, position_value, rollout
 from flybrain.envs.royale.strategy import Coach, View, place
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,8 +76,17 @@ def run_python():
             guard=[[[list(guard(v, c, ln)) for ln in (0, 1)] for c in [None] + [pick_card(v, r) for r in ROLES]]
                    for v in views],
             place_any=[[[list(place(v, n, ln)) for ln in (0, 1)] for n in SCENARIO["place_cards"]] for v in views],
+            value=[position_value(sim, p) for p in (0, 1)],
+            rollout=[position_value(rollout(sim, p, None, 3.0), p) for p in (0, 1)],
+            look=[look_plan(v) for v in views],
         ))
     return snaps
+
+
+def look_plan(view):
+    coach = Lookahead()
+    plan = list(coach.plan(view))
+    return [plan, None if coach.spot is None else [coach.spot[0], list(coach.spot[1])]]
 
 
 def run_node(tmp_path, scenario, brain=None):
@@ -88,7 +98,9 @@ def run_node(tmp_path, scenario, brain=None):
 
 def test_full_simulator_matches(tmp_path):
     py = run_python()
-    js = run_node(tmp_path, SCENARIO)["snapshots"]
+    out = run_node(tmp_path, SCENARIO)
+    assert out["look_defaults"] == LOOK_DEFAULTS                    # same lookahead settings
+    js = out["snapshots"]
     for p, j in zip(py, js):
         assert [u[:3] for u in p["units"]] == [u[:3] for u in j["units"]]
         np.testing.assert_allclose([u[3:] for u in p["units"]], [u[3:] for u in j["units"]], atol=1e-6)
@@ -102,6 +114,14 @@ def test_full_simulator_matches(tmp_path):
         assert p["plan"] == j["plan"]
         assert p["guard"] == j["guard"]
         np.testing.assert_allclose(p["place_any"], j["place_any"], atol=1e-9)
+        np.testing.assert_allclose(p["value"], j["value"], atol=1e-6)          # lookahead.py
+        np.testing.assert_allclose(p["rollout"], j["rollout"], atol=1e-6)
+        for (plan, spot), (jplan, jspot) in zip(p["look"], j["look"]):
+            assert plan == jplan
+            assert (spot is None) == (jspot is None)
+            if spot is not None:
+                assert spot[0] == jspot[0]
+                np.testing.assert_allclose(spot[1], jspot[1], atol=1e-9)
 
 
 @pytest.mark.parametrize("split", [False, True])

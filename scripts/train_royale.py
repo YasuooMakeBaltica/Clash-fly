@@ -31,10 +31,12 @@ from flybrain.agent import AgentConfig, FlyAgent  # noqa: E402
 from flybrain.connectome import load  # noqa: E402
 from flybrain.envs.royale.decks import load_deck  # noqa: E402
 from flybrain.envs.royale.env import HEADS, N_CHANNELS, SPLIT_HEADS, RoyaleEnv, decode, encode, role_mask  # noqa: E402
+from flybrain.envs.royale.lookahead import Lookahead  # noqa: E402
 from flybrain.envs.royale.strategy import BasicBot, Coach, RandomBot  # noqa: E402
 from flybrain.plasticity import PlasticityConfig  # noqa: E402
 
-OPPONENTS = {"random": lambda s: RandomBot(s), "basic": lambda s: BasicBot(s), "coach": lambda s: Coach()}
+OPPONENTS = {"random": lambda s: RandomBot(s), "basic": lambda s: BasicBot(s), "coach": lambda s: Coach(),
+             "lookahead": lambda s: Lookahead()}
 
 
 def make_agent(args, probe=None):
@@ -137,9 +139,9 @@ def agreement(agent, X, M, A, n=2000):
                 role=float((a[plays, 0] == t[plays, 0]).mean()), lane=float((a[plays, 1] == t[plays, 1]).mean()))
 
 
-def evaluate(agent, opponent, matches, fly_deck, share, seed, guard=False):
+def evaluate(agent, opponent, matches, fly_deck, share, seed, guard=False, coach=None):
     env = RoyaleEnv(matches, OPPONENTS[opponent], fly_deck=fly_deck, fly_deck_share=share, seed=seed, guard=guard,
-                    heads=agent.heads)
+                    heads=agent.heads, coach=coach)
     f, done = env.reset(), False
     while not done:
         f, _, done = env.step(agent.act(f, env.masks(), learn=False))

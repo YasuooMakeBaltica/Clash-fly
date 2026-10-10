@@ -98,8 +98,10 @@ def test_duplicate_duel_cancels_luck():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     from duel_coaches import coach_factory, duel
 
-    m, se, diff = duel(coach_factory(""), coach_factory(""), pairs=3, seed=1)
+    m, se, diff = duel("", "", pairs=3, seed=1)
     assert m == 0 and diff == 0                    # identical coaches: every pairing splits 1-1
     make = coach_factory("hold_line=7, place:building_y=6")
     c = make()
     assert c.p["hold_line"] == 7.0 and c.placer is not None
+    look = coach_factory("look, horizon=5")()
+    assert look.name == "lookahead" and look.look["horizon"] == 5.0

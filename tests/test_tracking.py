@@ -54,3 +54,28 @@ def test_never_negative_and_capped():
     t = EnemyElixir(start=1.0)
     assert t.update([enemy("Golem", 9, 30)], 0.5) == 0.0
     assert t.update([], 200.0) == 10.0
+
+
+def test_own_deploys_fill_in_until_seen():
+    from flybrain.real.tracking import OwnDeploys
+
+    own = OwnDeploys(keep=3.0)
+    hand = ["Knight", "Fireball", "Hog Rider", "Zap"]
+    own.add("Skeletons", 4.0, 10.0, 1.0)
+    own.add("Fireball", 4.0, 25.0, 1.0)                          # spells leave no troops
+    units = own.fill([], hand, 2.0)
+    assert [(u.owner, u.char) for u in units] == [(0, "Skeleton")] * 3
+    seen = [SeenUnit(owner=0, x=4.5, y=10.5, size=1, char="Skeleton")]
+    assert own.fill(seen, hand, 2.5) == seen                      # the detector has them now
+    assert own.fill([], hand, 2.6) == []                          # ... and they aren't added back
+
+
+def test_own_deploys_forget_failed_and_old_plays():
+    from flybrain.real.tracking import OwnDeploys
+
+    own = OwnDeploys(keep=3.0)
+    own.add("Knight", 4.0, 10.0, 1.0)
+    assert own.fill([], ["Knight", "Zap", "Fireball", "Hog Rider"], 2.0) == []   # still in hand: never played
+    own.add("Giant", 14.0, 10.0, 5.0)
+    assert len(own.fill([], ["Zap"], 7.0)) == 1
+    assert own.fill([], ["Zap"], 8.5) == []                        # older than keep

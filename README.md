@@ -112,6 +112,14 @@ it to `flybrain/envs/royale/data/cards.json` at tournament level 11).
   score exactly 0). Tuned this way: defensive buildings 6 tiles from the
   river, spells only for trades worth 1.5 elixir more than they cost,
   elixir held until 9.8 (+5 to +6 points per game against the earlier coach).
+* **Lookahead** (`lookahead.py`): before it defends, the coach tries every
+  card in hand that could help at a few spots, and waiting, each in a copy of
+  the match played 8 seconds ahead, and keeps the option that leaves the best
+  position (tower health, troops left standing on both sides by elixir worth,
+  elixir in hand). It beats the rule-only coach by +0.43 to +0.47 per game
+  in duplicate format (about 71% wins to 28% losses). The real bot and the
+  browser game use it; `--no-lookahead` turns it off in the real bot, and
+  `duel_coaches.py --a look` tests it.
 
 ## Clash Royale (simulated, starter deck)
 
@@ -172,7 +180,10 @@ full-card-pool brain (`models/fly_royale.pt`) and whatever deck you use:
    and lane, and the **coach guard** (`envs/royale/guard.py`) steps in where
    the brain is weak. It defends and finishes towers, takes good chances the
    brain lets pass, cancels spells with nothing to hit, and saves elixir for
-   your win condition. `--no-guard` plays with the pure brain. Champions'
+   your win condition. To defend, it first plays its options out a few
+   seconds ahead in copies of the rebuilt game state (`lookahead.py`). Troops
+   the bot just played stay in the state until the detector sees them, so it
+   doesn't defend twice. `--no-guard` plays with the pure brain. Champions'
    ability button is tapped when enemies come at you.
 
 ### Troop detector training
@@ -259,7 +270,7 @@ flybrain/
   agent.py        state -> PN encoding, MBON-group voting, reward -> DANs
   envs/catch.py   batched catch-the-ball
   envs/clash/     first simulator (starter deck only); used by the browser game
-  envs/royale/    full simulator: card database, roles, decks, coach, brain environment
+  envs/royale/    full simulator: card database, roles, decks, coach (+ lookahead), guard, brain environment
   real/           real game: adb, screen reading, troop detector, elixir counting, bot loop
 decks/fly.txt     the fly brain's deck (edit me)
 web/              browser game (Beat the Fly): JS port of the sim and brain

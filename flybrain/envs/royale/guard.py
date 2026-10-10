@@ -27,6 +27,7 @@ from .strategy import Coach, View, spell_spot
 
 TAKE_OVER = ("finish", "defend")
 WHEN_IDLE = ("trade", "counterpush", "punish", "leak")
+HOLD_VETO = True       # a lookahead coach found waiting better than this card in this lane: wait
 
 
 def guard(view: View, card: str | None, lane: int, coach: Coach | None = None) -> tuple[str | None, int, str]:
@@ -39,6 +40,8 @@ def guard(view: View, card: str | None, lane: int, coach: Coach | None = None) -
         if reason in WHEN_IDLE and c_card is not None:
             return c_card, c_lane, f"coach:{reason}"
         return None, lane, "fly"
+    if HOLD_VETO and reason == "hold" and lane == c_lane and card in getattr(coach, "tried", ()):
+        return None, lane, "hold"
     c = view.db.cards[card]
     if c.type == "spell" and not c.summons and card != c_card and spell_spot(view, card)[0] < c.elixir:
         return None, lane, "veto"

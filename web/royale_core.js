@@ -920,6 +920,8 @@ const RoyaleCore = (() => {
       return true;
     },
     suggest(view) { const [card, lane] = this.plan(view); return [card, lane]; },
+    // where to drop the card: the spot the last plan() chose for it (lookahead), else place()
+    where(view, card, lane) { return this.spot && this.spot[0] === card ? this.spot[1] : place(view, card, lane); },
     // [card or null, lane, reason]: finish, defend, hold, trade, counterpush, punish, leak or null
     plan(view) {
       const db = view.db, play = view.playable(), roles = {};
@@ -979,14 +981,16 @@ const RoyaleCore = (() => {
 
   // ----------------------------------------------------------------- guard.py
   const TAKE_OVER = new Set(["finish", "defend"]), WHEN_IDLE = new Set(["trade", "counterpush", "punish", "leak"]);
+  const HOLD_VETO = true;   // a lookahead coach found waiting better than this card in this lane: wait
   // The fly decides; coach rules step in where it is weak. Returns [card or null, lane, who].
-  function guard(view, card, lane) {
-    const [cCard, cLane, reason] = Coach.plan(view);
+  function guard(view, card, lane, coach = Coach) {
+    const [cCard, cLane, reason] = coach.plan(view);
     if (TAKE_OVER.has(reason) && cCard !== null) return [cCard, cLane, `coach:${reason}`];
     if (card === null) {
       if (WHEN_IDLE.has(reason) && cCard !== null) return [cCard, cLane, `coach:${reason}`];
       return [null, lane, "fly"];
     }
+    if (HOLD_VETO && reason === "hold" && lane === cLane && coach.tried && coach.tried.has(card)) return [null, lane, "hold"];
     const c = view.db.cards[card];
     if (c.type === "spell" && !c.summons.length && card !== cCard && spellSpot(view, card)[0] < c.elixir) return [null, lane, "veto"];
     if (![0, 1].some((ln) => view.threats(ln).length)) {
@@ -1000,6 +1004,135 @@ const RoyaleCore = (() => {
     if (cCard !== null) lane = cLane;
     return [card, lane, "fly"];
   }
+
+  // ------------------------------------------------------------- lookahead.py
+  // The coach tries its defensive options in copies of the match before choosing (see lookahead.py).
+  const LOOK = { horizon: 8, tower_hp: 150, crown: 10, danger: 1, own: 1, offense: 1, wait_margin: 0, trades: 0 };
+  let dbObjects = null;
+  function cloneSim(sim, seed) {
+    if (!dbObjects || dbObjects.db !== sim.db) {          // everything reachable from the card data is shared
+      const set = new Set(), stack = [sim.db];
+      while (stack.length) {
+        const o = stack.pop();
+        if (o === null || typeof o !== "object" || set.has(o)) continue;
+        set.add(o);
+        for (const v of Object.values(o)) stack.push(v);
+      }
+      dbObjects = { db: sim.db, set };
+    }
+    const keep = dbObjects.set, memo = new Map();
+    const cp = (o) => {
+      if (o === null || typeof o !== "object" || keep.has(o)) return o;
+      if (memo.has(o)) return memo.get(o);
+      let out;
+      if (Array.isArray(o)) { out = []; memo.set(o, out); for (const v of o) out.push(cp(v)); return out; }
+      if (o instanceof Set) { out = new Set(); memo.set(o, out); for (const v of o) out.add(cp(v)); return out; }
+      if (o instanceof Map) { out = new Map(); memo.set(o, out); for (const [k, v] of o) out.set(cp(k), cp(v)); return out; }
+      out = Object.create(Object.getPrototypeOf(o)); memo.set(o, out);
+      for (const k of Object.keys(o)) out[k] = cp(o[k]);
+      return out;
+    };
+    const events = sim.events, rng = sim.rng;
+    sim.events = []; sim.rng = null;
+    try { const c = cp(sim); c.rng = ClashCore.rng(seed); return c; } finally { sim.events = events; sim.rng = rng; }
+  }
+  const CHAR_VALUE = new Map();
+  function charValue(spec, db) {
+    if (!CHAR_VALUE.size) {
+      for (const c of Object.values(db.cards).sort((a, b) => b.elixir - a.elixir)) {
+        if (c.event || !c.role || !c.summons.length) continue;
+        const parts = [];
+        for (const [s, k] of c.summons) {
+          parts.push([s, k]);
+          if (s.spawn_character && s.spawn_attach) parts.push([s.spawn_character, Math.max(1, s.spawn_number || 1)]);
+        }
+        const total = parts.reduce((t, [s, k]) => t + Math.max(s.hp + s.shield, 1) * k, 0);
+        for (const [s] of parts) CHAR_VALUE.set(s.name, c.elixir * Math.max(s.hp + s.shield, 1) / total);
+      }
+    }
+    return CHAR_VALUE.has(spec.name) ? CHAR_VALUE.get(spec.name) : Math.min(3, (spec.hp + spec.shield) / 600);
+  }
+  function positionValue(sim, me, w = LOOK) {
+    let v = sim.players[me].elixir;
+    for (const t of sim.towers()) {
+      const s = t.owner === me ? 1 : -w.offense;
+      v += s * (t.alive ? Math.max(t.hp, 0) : 0) / w.tower_hp;
+      if (!t.alive || t.hp <= 0) v -= s * w.crown;
+    }
+    for (const u of sim.units) {
+      if (u.tower || !u.alive || u.timed || !u.spec) continue;
+      const frac = Math.max(0, u.hp + u.shield) / Math.max(u.max_hp + u.spec.shield, 1);
+      const val = charValue(u.spec, sim.db) * frac;
+      if (u.owner === me) v += val * w.own; else v -= val * (frameY(me, u.y) < 15 ? w.danger : 1);
+    }
+    return v;
+  }
+  function rollout(sim, me, play, horizon, seed = 1) {
+    const c = cloneSim(sim, seed);
+    if (play && !c.play(me, ...play)) return null;
+    for (let i = 0, n = Math.round(horizon / DT); i < n && !c.done; i++) c.step();
+    return c;
+  }
+  // (x, y) moved just outside our crown towers: troops can't be dropped on them (3x3 princess, 4x4 king)
+  function offTowers(sim, me, x, y) {
+    for (const t of sim.towers(me)) {
+      if (!t.alive) continue;
+      const h = t.tower === "princess" ? 1.5 : 2, dx = x - t.x, dy = y - t.y;
+      if (Math.abs(dx) < h && Math.abs(dy) < h) {
+        if (Math.abs(dx) > Math.abs(dy)) x = t.x + Math.sign(dx) * (h + 0.1);
+        else y = t.y + (dy ? Math.sign(dy) : me === 0 ? 1 : -1) * (h + 0.1);
+      }
+    }
+    return [x, y];
+  }
+  function spots(view, name, lane) {
+    const c = view.db.cards[name], me = view.me, out = [place(view, name, lane)];
+    if ((c.type === "spell" && !c.summons.length) || DROP_ON_TOWER.has(name)) return out;
+    if (SIEGE.has(name) || c.role === "spawner") return [offTowers(view.sim, me, out[0][0], out[0][1])];
+    const tc = lane === 0 ? 1 : -1;
+    if (c.type === "building") {
+      out.push([WIDTH / 2 - tc * 1.5, absY(me, 6)], [WIDTH / 2 - tc * 1.5, absY(me, 11)], [WIDTH / 2, absY(me, 8)]);
+      return out.map((s) => offTowers(view.sim, me, s[0], s[1]));
+    }
+    const threats = view.threats(lane);
+    if (threats.length) {
+      const lead = minBy(threats, (u) => view.fy(u.y)), lfy = Math.min(view.fy(lead.y), 14), x = clip(lead.x, 0.5, WIDTH - 0.5);
+      out.push([x, absY(me, Math.max(0.5, lfy - 1))], [x, absY(me, Math.max(0.5, lfy - 4))],
+               [WIDTH / 2 - tc, absY(me, Math.max(0.5, Math.min(lfy - 3, 9)))], [LANE_X[lane] + tc * 1.5, absY(me, 4.5)]);
+    }
+    const off = out.map((s) => offTowers(view.sim, me, s[0], s[1]));
+    return off.filter((s, i) => off.slice(0, i).every((o) => dist(s[0], s[1], o[0], o[1]) > 0.25));
+  }
+  // Coach whose defence (card, spot, or waiting) is chosen by simulating the options.
+  const Lookahead = Object.assign(Object.create(Coach), {
+    reasons: new Set(["defend", "hold"]), spot: null, rollouts: 0, tried: new Set(),
+    plan(view) {
+      let [card, lane, reason] = Coach.plan.call(this, view);
+      this.spot = null; this.tried = new Set();
+      if (!this.reasons.has(reason)) return [card, lane, reason];
+      const play = view.playable();
+      let cands;
+      if (reason === "hold") cands = play.filter((n) => view.db.cards[n].role !== "win_condition");
+      else { const prof = view.profile(view.threats(lane)); cands = play.filter((n) => this.cardFit(view, n, prof)); }
+      if (card !== null && !cands.includes(card)) cands.push(card);
+      this.tried = new Set(cands);
+      const options = [[null, null]];
+      for (const n of cands) for (const xy of spots(view, n, lane)) options.push([n, xy]);
+      let best = null, bestV = -Infinity;
+      const seed = (Math.round(view.sim.time * 10) * 7919 + view.sim._uid) >>> 0;
+      for (const [n, xy] of options) {
+        const r = rollout(view.sim, view.me, n === null ? null : [n, xy[0], xy[1]], LOOK.horizon, seed);
+        this.rollouts++;
+        if (r === null) continue;
+        const v = positionValue(r, view.me) - (n === null ? 0 : LOOK.wait_margin);
+        if (v > bestV + 1e-9) { best = [n, xy]; bestV = v; }
+      }
+      if (best === null) return [card, lane, reason];
+      if (best[0] === null) return [null, lane, "hold"];
+      this.spot = best;
+      return [best[0], lane, reason];
+    },
+  });
 
   function autoAbility(sim, player) {
     for (const u of sim.units) {
@@ -1086,7 +1219,8 @@ const RoyaleCore = (() => {
   }
 
   return { WIDTH, HEIGHT, RIVER_LO, RIVER_HI, LANE_X, DT, TOWER, ROLES, CHANNELS, REGULATION, OVERTIME_END, DOUBLE_AT, TRIPLE_AT,
-    buildDB, Sim, View, place, spellSpot, Coach, guard, PLACE, COACH, autoAbility, features, roleMask, pickCard, hitsAir, frameY, absY, laneOf };
+    buildDB, Sim, View, place, spellSpot, Coach, guard, PLACE, COACH, autoAbility, features, roleMask, pickCard, hitsAir, frameY, absY, laneOf,
+    Lookahead, LOOK, cloneSim, positionValue, rollout, charValue, offTowers };
 })();
 
 if (typeof module !== "undefined") module.exports = RoyaleCore;

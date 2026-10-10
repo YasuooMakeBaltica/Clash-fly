@@ -152,7 +152,7 @@ class RoyaleEnv:
 
     def __init__(self, batch: int, opponent_factory, fly_deck: list[str] | None = None, fly_deck_share: float = 0.3,
                  decision_every: float = 1.0, seed: int = 0, leak_penalty: float = 0.02, damage_weight: float = 0.5,
-                 guard: bool = False, heads=HEADS):
+                 guard: bool = False, heads=HEADS, coach: Coach | None = None):
         self.batch = batch
         self.opponent_factory = opponent_factory
         self.fly_deck = fly_deck
@@ -164,7 +164,7 @@ class RoyaleEnv:
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.db = load()
-        self.coach = Coach()
+        self.coach = coach or Coach()         # teacher, and the guard's coach
         self.episode = 0
 
     def _deck(self) -> list[str]:
@@ -226,7 +226,7 @@ class RoyaleEnv:
                 view = View(sim, 0)
                 card, lane, _ = guarded_action(view, role, lane, self.coach)
                 if card is not None:
-                    x, y = place(view, card, lane)
+                    x, y = self.coach.where(view, card, lane)
                     if sim.play(0, card, x, y):
                         self.last_cards[i] = card
             elif role > 0:

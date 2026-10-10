@@ -31,6 +31,44 @@ SPAWNED_BY = {   # troop -> enemy building or troop that makes it for free
 NOT_A_CARD = {"Golemite", "LavaPups", "ElixirGolem1", "ElixirGolem2", "PhoenixEgg", "PhoenixNoRespawn", "VoodooHog"}
 
 
+class OwnDeploys:
+    """Troops the bot just deployed, kept in the game state until the detector sees them.
+
+    A new troop plays a deploy animation for about a second before it can be
+    recognised, so the next screenshot often doesn't show it yet, and the coach
+    would see an undefended lane and defend twice. For ``keep`` seconds after a
+    play, its troops are added at the drop spot until the detector sees one of
+    them nearby. A play that didn't happen (the card is still in the hand;
+    played cards go to the back of the 8-card cycle) is dropped.
+    """
+
+    def __init__(self, db: DB | None = None, keep: float = 3.0, radius: float = 3.0):
+        self.db = db or load()
+        self.keep, self.radius = keep, radius
+        self.pending: list[dict] = []
+
+    def add(self, card: str, x: float, y: float, now: float) -> None:
+        troops = [(spec.name, k) for spec, k in self.db.cards[card].summons]
+        if troops:
+            self.pending.append(dict(t=now, card=card, x=x, y=y, troops=troops))
+
+    def fill(self, units: list, hand: list, now: float) -> list:
+        """``units`` plus the pending troops the detector doesn't show yet."""
+        from .perception import SeenUnit
+
+        self.pending = [p for p in self.pending if now - p["t"] <= self.keep and p["card"] not in hand]
+        out = list(units)
+        for p in list(self.pending):
+            chars = {c for c, _ in p["troops"]}
+            if any(u.owner == 0 and u.char in chars and math.hypot(u.x - p["x"], u.y - p["y"]) <= self.radius
+                   for u in units):
+                self.pending.remove(p)            # seen: the detector has it from here on
+                continue
+            out += [SeenUnit(owner=0, x=p["x"], y=p["y"], size=1, char=c, score=0.0)
+                    for c, k in p["troops"] for _ in range(k)]
+        return out
+
+
 class EnemyElixir:
     def __init__(self, db: DB | None = None, start: float = 5.0, match_radius: float = 3.0, group_radius: float = 3.5):
         self.db = db or load()

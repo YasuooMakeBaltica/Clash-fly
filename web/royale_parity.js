@@ -9,7 +9,7 @@ const sim = new R.Sim(db, sc.decks, 1, false);
 sim.players.forEach((p, i) => { p.hand = sc.hands[i].slice(); p.queue = sc.queues[i].slice(); p.elixir = 10; });
 sim.tower(1, "princess", 0).hp -= 1;   // avoid random tie-breaks in weak_lane
 let tick = 0;
-const out = { snapshots: [], votes: [] };
+const out = { snapshots: [], votes: [], look_defaults: R.LOOK };
 const ev = sc.events.slice();
 for (const at of sc.snapshot_ticks) {
   while (tick < at) {
@@ -34,6 +34,9 @@ for (const at of sc.snapshot_ticks) {
     plan: views.map((v) => R.Coach.plan(v)),
     guard: views.map((v) => [null].concat(R.ROLES.map((r) => R.pickCard(v, r))).map((c) => [0, 1].map((l) => R.guard(v, c === undefined ? null : c, l)))),
     place_any: views.map((v) => (sc.place_cards || []).map((n) => [0, 1].map((l) => R.place(v, n, l)))),
+    value: views.map((v) => R.positionValue(sim, v.me)),
+    rollout: views.map((v) => R.positionValue(R.rollout(sim, v.me, null, 3.0), v.me)),
+    look: views.map((v) => { const plan = R.Lookahead.plan(v); return [plan, R.Lookahead.spot]; }),
   });
 }
 if (process.argv[3]) {
